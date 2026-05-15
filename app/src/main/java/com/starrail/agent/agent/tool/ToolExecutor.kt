@@ -536,6 +536,14 @@ class ToolExecutor(
             else -> listOf("躯干: 暴击率", "脚部: 速度", "位面球: 攻击%", "连结绳: 攻击%")
         }
         
+        // 光锥推荐：按命途筛选，五星优先
+        val allCones = ds.getAllLightCones()
+        val pathCones = allCones.filter { it.path == path }
+            .sortedByDescending { it.rarity }
+        val recommendedCones = pathCones.take(5).map { lc ->
+            "${lc.name} ★${lc.rarity} — ${lc.skill.name}: ${lc.superimposeLevels.firstOrNull()?.description?.take(40) ?: ""}"
+        }
+        
         return mapOf(
             "character" to char.name,
             "path" to path.displayName,
@@ -545,6 +553,7 @@ class ToolExecutor(
                 "四件套推荐" to recommended4pc,
                 "二件套推荐" to recommended2pc
             ),
+            "recommended_light_cones" to recommendedCones,
             "recommended_main_stats" to recommendedMainStats,
             "summary" to "${char.name}（${path.displayName}·${element.name}）推荐使用 ${recommended4pc.firstOrNull() ?: "输出"} 四件套 + ${recommended2pc.firstOrNull() ?: "通用"} 二件套"
         )
@@ -802,7 +811,7 @@ class ToolExecutor(
             ),
             "get_recommended_build" to ToolDefinition(
                 name = "get_recommended_build",
-                description = "获取角色推荐遗器配装方案",
+                description = "获取角色推荐配装方案（含遗器套装、光锥、主词条）",
                 parameters = listOf(
                     ToolParameter("character_name", ParameterType.STRING, "角色名称", true)
                 ),
