@@ -285,6 +285,30 @@ class StarRailAgent(
     fun getLightCones(): List<String> = gameDataSource.getAllLightCones().map { "${it.name} (${it.path.displayName})" }
     fun getEnemies(): List<String> = gameDataSource.getAllEnemies().map { "${it.name} - Lv.${it.level}" }
     fun clearConversation(conversationId: String) { conversations.remove(conversationId); llmConversations.remove(conversationId) }
+    
+    // ============================================================
+    // 对话管理 API
+    // ============================================================
+    
+    /** 获取对话列表 [(id, 预览文本)] */
+    fun getConversationList(): List<Pair<String, String>> {
+        return llmConversations.map { (id, msgs) ->
+            val preview = msgs.filter { it.role == LlmRole.USER }
+                .firstOrNull()?.content?.take(40) ?: "空对话"
+            id to preview
+        }
+    }
+    
+    /** 获取对话的完整消息列表 */
+    fun getConversationMessages(convId: String): List<LlmMessage> {
+        return llmConversations[convId] ?: emptyList()
+    }
+    
+    /** 删除指定对话 */
+    fun deleteConversation(convId: String) {
+        llmConversations.remove(convId)
+        conversations.remove(convId)
+    }
 }
 
 data class AgentResponse(

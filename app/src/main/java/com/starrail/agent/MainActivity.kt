@@ -44,6 +44,9 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.withStyle
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Close
 import com.starrail.agent.agent.StarRailAgent
 import com.starrail.agent.agent.llm.LlmConfig
 import com.starrail.agent.agent.llm.OpenAiLlmService
@@ -141,7 +144,7 @@ private fun MainScreen(
 }
 
 // ============================================================
-// 聊天界面
+// 聊天界面（带对话历史侧边栏）
 // ============================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -152,10 +155,19 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
     var isLoading by remember { mutableStateOf(false) }
     val chatItems = remember { mutableStateListOf<ChatItem>() }
     var showClearConfirm by remember { mutableStateOf(false) }
-    // 追踪当前会话 ID（一个空会话）
     var currentConvId by remember { mutableStateOf<String?>(null) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    
+    // 对话列表状态
+    var conversationList by remember { mutableStateOf(agent.getConversationList()) }
+    
+    fun refreshConversationList() {
+        conversationList = agent.getConversationList()
+    }
 
-    LaunchedEffect(Unit) {
+    fun resetToWelcome() {
+        chatItems.clear()
+        currentConvId = null
         chatItems.add(ChatItem.Message("你好！我是星穹铁道 AI 助手 ✨\n\n我可以帮你：", false))
         chatItems.add(ChatItem.Action("📋 查询角色", "请列出所有角色"))
         chatItems.add(ChatItem.Action("⚔️ 战斗模拟", "模拟希儿战斗"))
@@ -164,38 +176,132 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
         scope.launch { listState.animateScrollToItem(chatItems.size - 1) }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("星穹铁道 AI 助手", fontWeight = FontWeight.Bold) },
-                actions = {
-                    IconButton(onClick = { showClearConfirm = true }) {
-                        Icon(Icons.Default.Delete, contentDescription = "清空对话",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onClick = {
-                        currentConvId?.let { agent.clearConversation(it) }
-                        chatItems.clear()
-                        currentConvId = null
-                        chatItems.add(ChatItem.Message("你好！我是星穹铁道 AI 助手 ✨\n\n我可以帮你：", false))
-                        chatItems.add(ChatItem.Action("📋 查询角色", "请列出所有角色"))
-                        chatItems.add(ChatItem.Action("⚔️ 战斗模拟", "模拟希儿战斗"))
-                        chatItems.add(ChatItem.Action("💎 星魂分析", "希儿星魂提升有多大"))
-                        chatItems.add(ChatItem.Action("🎯 推荐配队", "配队推荐"))
-                        scope.launch { listState.animateScrollToItem(chatItems.size - 1) }
-                    }) {
-                        Icon(Icons.Default.Add, contentDescription = "新建对话")
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+    LaunchedEffect(Unit) { resetToWelcome() }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(modifier = Modifier.width(300.dp)) {
+                // 头部
+                Text(
+                    "对话历史",
+                    modifier = Modifier.padding(16.dp),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
                 )
-            )
+                HorizontalDivider()
+                
+                if (conversationList.isEmpty()) {
+                    Text(
+                        "暂无历史对话",
+                        modifier = Modifier.padding(24.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    items(conversationList.toList()) { (convId, preview) ->
+                        Surface(
+                            onClick = {
+                                // 加载该对话的历史消息
+                                val msgs = agent.getConversationMessages(convId)
+                                chatItems.clear()
+                                var first = true
+                                for (msg in msgs) {
+                                    when (msg.role) {
+                                        com.starrail.agent.agent.llm.LlmRole.USER -> {
+                                            chatItems.add(ChatItem.Message(msg.content ?: "", true))
+                                        }
+                                        com.starrail.agent.agent.llm.LlmRole.ASSISTANT -> {
+                                            if (!msg.content.isNullOrEmpty() && !first) {
+                                                chatItems.add(ChatItem.Message(msg.content, false))
+                                            }
+                                            first = false
+                                        }
+                                        else -> {}
+                                    }
+                                }
+                                currentConvId = convId
+                                scope.launch { drawerState.close() }
+                                scope.launch { listState.animateScrollToItem(chatItems.size - 1) }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Icon(
+                                    Icons.Default.History,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = preview,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                IconButton(
+                                    onClick = {
+                                        agent.deleteConversation(convId)
+                                        refreshConversationList()
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "删除",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                                    )
+                                }
+                            }
+                        }
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    }
+                }
+            }
         }
-    ) { padding ->
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("星穹铁道 AI 助手", fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            refreshConversationList()
+                            scope.launch { drawerState.open() }
+                        }) {
+                            Icon(Icons.Default.Menu, contentDescription = "历史对话",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showClearConfirm = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "清空对话",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = {
+                            currentConvId?.let { agent.clearConversation(it) }
+                            resetToWelcome()
+                        }) {
+                            Icon(Icons.Default.Add, contentDescription = "新建对话")
+                        }
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Default.Settings, contentDescription = "设置")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            }
+        ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
@@ -270,8 +376,9 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
                 }
             }
         }
-    }
-}
+        }  // 关闭 Scaffold content lambda
+    }  // 关闭 ModalNavigationDrawer content lambda
+}  // 关闭 StarRailChatScreen
 
 // ============================================================
 // LLM 设置界面
