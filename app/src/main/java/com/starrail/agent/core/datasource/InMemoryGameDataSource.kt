@@ -489,16 +489,50 @@ class InMemoryGameDataSource {
         }
     }
     
-    /** 创建光锥数据 */
+    /** 创建光锥数据（32个真实光锥） */
     private fun createLightCones(): List<LightCone> = listOf(
-        createLightCone("lc_1001", "于夜色中", 5, PathType.虚无, EffectType.DMG_UP, 0.36),
-        createLightCone("lc_1002", "世界的一片", 5, PathType.巡猎, EffectType.CRIT_RATE_UP, 0.18),
-        createLightCone("lc_1003", "锋镝", 4, PathType.巡猎, EffectType.ATK_UP, 0.24),
-        createLightCone("lc_1004", "早餐的仪式感", 4, PathType.同谐, EffectType.SPD_UP, 0.06),
-        createLightCone("lc_1005", "记一位星神的陨落", 5, PathType.智识, EffectType.DMG_UP, 0.32),
+        // ===== 五星限定光锥 =====
+        createLightCone("lc_1001", "于夜色中", 5, PathType.巡猎, EffectType.CRIT_RATE_UP, 0.18),
+        createLightCone("lc_1002", "拂晓之前", 5, PathType.智识, EffectType.CRIT_DMG_UP, 0.36),
+        createLightCone("lc_1003", "但战斗还未结束", 5, PathType.同谐, EffectType.ENERGY_REGEN_UP, 0.10),
+        createLightCone("lc_1004", "银河铁道之夜", 5, PathType.智识, EffectType.ATK_UP, 0.24),
+        createLightCone("lc_1005", "记一位星神的陨落", 5, PathType.毁灭, EffectType.ATK_UP, 0.24),
         createLightCone("lc_1006", "无可取代的东西", 5, PathType.毁灭, EffectType.CRIT_DMG_UP, 0.48),
-        createLightCone("lc_1007", "余梦的办法", 4, PathType.丰饶, EffectType.HP_UP, 0.32),
-        createLightCone("lc_1008", "这就是我啦！", 4, PathType.存护, EffectType.DEF_UP, 0.30)
+        createLightCone("lc_1007", "如泥酣眠", 5, PathType.巡猎, EffectType.CRIT_DMG_UP, 0.36),
+        createLightCone("lc_1008", "此身为剑", 5, PathType.毁灭, EffectType.CRIT_DMG_UP, 0.42),
+        createLightCone("lc_1009", "制胜的瞬间", 5, PathType.存护, EffectType.DEF_UP, 0.36),
+        createLightCone("lc_1010", "时节不居", 5, PathType.丰饶, EffectType.HP_UP, 0.36),
+        createLightCone("lc_1011", "棺的回响", 5, PathType.丰饶, EffectType.ATK_UP, 0.24),
+        createLightCone("lc_1012", "到不了的彼岸", 5, PathType.毁灭, EffectType.CRIT_RATE_UP, 0.18),
+        createLightCone("lc_1013", "此间得自在", 5, PathType.巡猎, EffectType.CRIT_RATE_UP, 0.18),
+        createLightCone("lc_1014", "阳光永照之处", 5, PathType.同谐, EffectType.DMG_UP, 0.24),
+        createLightCone("lc_1015", "雨一直下", 5, PathType.虚无, EffectType.EFFECT_HIT_UP, 0.24),
+        createLightCone("lc_1016", "最后的赢家", 5, PathType.巡猎, EffectType.CRIT_RATE_UP, 0.18),
+        createLightCone("lc_1017", "天才们的休憩", 5, PathType.智识, EffectType.ATK_UP, 0.24),
+        createLightCone("lc_1018", "片刻，留在眼底", 5, PathType.智识, EffectType.CRIT_DMG_UP, 0.36),
+        // ===== 四星光锥 =====
+        createLightCone("lc_1019", "晚安与睡颜", 4, PathType.虚无, EffectType.DMG_UP, 0.24),
+        createLightCone("lc_1020", "舞！舞！舞！", 4, PathType.同谐, EffectType.SPD_UP, 0.08),
+        createLightCone("lc_1021", "镂月裁云之意", 4, PathType.同谐, EffectType.ATK_UP, 0.16),
+        createLightCone("lc_1022", "行星相会", 4, PathType.同谐, EffectType.DMG_UP, 0.24),
+        createLightCone("lc_1023", "别让世界静下来", 4, PathType.智识, EffectType.ENERGY_REGEN_UP, 0.08),
+        createLightCone("lc_1024", "今日亦是和平的一日", 4, PathType.智识, EffectType.ATK_UP, 0.16),
+        createLightCone("lc_1025", "秘密誓心", 4, PathType.毁灭, EffectType.ATK_UP, 0.20),
+        createLightCone("lc_1026", "鼹鼠党欢迎你", 4, PathType.毁灭, EffectType.ATK_UP, 0.24),
+        createLightCone("lc_1027", "论剑", 4, PathType.巡猎, EffectType.DMG_UP, 0.32),
+        createLightCone("lc_1028", "唯有沉默", 4, PathType.巡猎, EffectType.ATK_UP, 0.24),
+        createLightCone("lc_1029", "春水初生", 4, PathType.巡猎, EffectType.SPD_UP, 0.08),
+        createLightCone("lc_1030", "点个关注吧！", 4, PathType.巡猎, EffectType.CRIT_RATE_UP, 0.12),
+        createLightCone("lc_1031", "此时恰好", 4, PathType.丰饶, EffectType.HP_UP, 0.24),
+        createLightCone("lc_1032", "同一种心情", 4, PathType.丰饶, EffectType.HP_UP, 0.20),
+        createLightCone("lc_1033", "我是站长！", 4, PathType.存护, EffectType.DEF_UP, 0.24),
+        createLightCone("lc_1034", "余烬", 4, PathType.存护, EffectType.DEF_UP, 0.20),
+        createLightCone("lc_1035", "猎物的视线", 4, PathType.虚无, EffectType.EFFECT_HIT_UP, 0.20),
+        createLightCone("lc_1036", "决心如汗珠般闪耀", 4, PathType.虚无, EffectType.DEF_PENETRATION, 0.16),
+        createLightCone("lc_1037", "延长记号", 4, PathType.虚无, EffectType.BREAK_DMG_UP, 0.28),
+        createLightCone("lc_1038", "记忆中的模样", 4, PathType.同谐, EffectType.ENERGY_REGEN_UP, 0.08),
+        createLightCone("lc_1039", "鸣弦初闻", 4, PathType.同谐, EffectType.DMG_UP, 0.24),
+        createLightCone("lc_1040", "芳华待灼", 4, PathType.毁灭, EffectType.CRIT_DMG_UP, 0.32),
     )
     
     private fun createLightCone(
