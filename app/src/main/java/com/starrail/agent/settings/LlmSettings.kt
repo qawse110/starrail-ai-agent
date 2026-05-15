@@ -13,7 +13,8 @@ data class LlmSettingsData(
     val model: String = "gpt-4o-mini",
     val temperature: Double = 0.7,
     val maxTokens: Int = 2048,
-    val enabled: Boolean = false
+    val enabled: Boolean = false,
+    val darkMode: Boolean = false
 )
 
 /** 支持的 LLM 提供商 */
@@ -37,6 +38,7 @@ class LlmSettings(private val prefs: SharedPreferences) {
         private const val KEY_MODEL = "llm_model"
         private const val KEY_TEMPERATURE = "llm_temperature"
         private const val KEY_MAX_TOKENS = "llm_max_tokens"
+        private const val KEY_DARK_MODE = "dark_mode"
 
         fun getInstance(context: Context): LlmSettings {
             val prefs = context.getSharedPreferences("starrail_llm", Context.MODE_PRIVATE)
@@ -57,7 +59,8 @@ class LlmSettings(private val prefs: SharedPreferences) {
                 ?: provider.defaultModel,
             temperature = prefs.getFloat(KEY_TEMPERATURE, 0.7f).toDouble(),
             maxTokens = prefs.getInt(KEY_MAX_TOKENS, 2048),
-            enabled = prefs.getBoolean(KEY_ENABLED, false)
+            enabled = prefs.getBoolean(KEY_ENABLED, false),
+            darkMode = prefs.getBoolean(KEY_DARK_MODE, false)
         )
     }
 
@@ -70,6 +73,7 @@ class LlmSettings(private val prefs: SharedPreferences) {
             .putString(KEY_MODEL, settings.model)
             .putFloat(KEY_TEMPERATURE, settings.temperature.toFloat())
             .putInt(KEY_MAX_TOKENS, settings.maxTokens)
+            .putBoolean(KEY_DARK_MODE, settings.darkMode)
             .apply()
     }
 

@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,6 +18,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -27,7 +31,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +54,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Share
+import com.starrail.agent.agent.ConversationExporter
+import com.starrail.agent.agent.ConversationRepository
 import com.starrail.agent.agent.StarRailAgent
 import com.starrail.agent.agent.llm.LlmConfig
 import com.starrail.agent.agent.llm.OpenAiLlmService
@@ -54,6 +64,7 @@ import com.starrail.agent.player.db.AppDatabase
 import com.starrail.agent.settings.LlmProvider
 import com.starrail.agent.settings.LlmSettings
 import com.starrail.agent.settings.LlmSettingsData
+import com.starrail.agent.core.util.MarkdownParser
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -67,28 +78,40 @@ sealed class ChatItem {
 }
 
 /** 页面枚举 */
-private enum class Page { CHAT, SETTINGS }
+private enum class Page { CHAT, SETTINGS, GALLERY, REFERENCE }
 
 // ============================================================
 // MainActivity
 // ============================================================
 class MainActivity : ComponentActivity() {
     private lateinit var llmSettings: LlmSettings
+    private lateinit var convRepo: ConversationRepository
     private var agent: StarRailAgent = StarRailAgent()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         llmSettings = LlmSettings.getInstance(this)
         AppDatabase.getFileInstance(filesDir)
+        convRepo = ConversationRepository(filesDir)
         agent = createAgentFromSettings()
 
         setContent {
-            MaterialTheme {
+            val settingsState = remember { mutableStateOf(llmSettings.load()) }
+            val isDarkMode = settingsState.value.darkMode || isSystemInDarkTheme()
+            val colorScheme = if (isDarkMode) darkColorScheme() else lightColorScheme()
+
+            MaterialTheme(colorScheme = colorScheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainScreen(agent, llmSettings, ::recreateAgent)
+                    MainScreen(
+                        agent = agent,
+                        llmSettings = llmSettings,
+                        settingsState = settingsState,
+                        onSettingsChanged = ::recreateAgent,
+                        playerDao = AppDatabase.getFileInstance(filesDir).playerDao()
+                    )
                 }
             }
         }
@@ -106,9 +129,9 @@ class MainActivity : ComponentActivity() {
                     maxTokens = settings.maxTokens
                 )
             )
-            StarRailAgent(llmService)
+            StarRailAgent(llmService, convRepo)
         } else {
-            StarRailAgent()
+            StarRailAgent(null, convRepo)
         }
     }
 
@@ -124,21 +147,35 @@ class MainActivity : ComponentActivity() {
 private fun MainScreen(
     agent: StarRailAgent,
     llmSettings: LlmSettings,
-    onSettingsChanged: () -> Unit
+    settingsState: MutableState<LlmSettingsData>,
+    onSettingsChanged: () -> Unit,
+    playerDao: com.starrail.agent.player.db.PlayerDao? = null
 ) {
     var currentPage by remember { mutableStateOf(Page.CHAT) }
 
     when (currentPage) {
         Page.CHAT -> StarRailChatScreen(
             agent = agent,
-            onOpenSettings = { currentPage = Page.SETTINGS }
+            onOpenSettings = { currentPage = Page.SETTINGS },
+            onOpenGallery = { currentPage = Page.GALLERY },
+            onOpenReference = { currentPage = Page.REFERENCE }
         )
         Page.SETTINGS -> LlmSettingsScreen(
             llmSettings = llmSettings,
+            settingsState = settingsState,
             onBack = {
                 onSettingsChanged()
                 currentPage = Page.CHAT
             }
+        )
+        Page.GALLERY -> CharacterGalleryScreen(
+            dataSource = agent.gameDataSource,
+            playerDao = playerDao,
+            onBack = { currentPage = Page.CHAT }
+        )
+        Page.REFERENCE -> ReferenceScreen(
+            dataSource = agent.gameDataSource,
+            onBack = { currentPage = Page.CHAT }
         )
     }
 }
@@ -148,7 +185,7 @@ private fun MainScreen(
 // ============================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
+fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit, onOpenGallery: () -> Unit, onOpenReference: () -> Unit) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var inputText by remember { mutableStateOf("") }
@@ -168,11 +205,17 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
     fun resetToWelcome() {
         chatItems.clear()
         currentConvId = null
-        chatItems.add(ChatItem.Message("你好！我是星穹铁道 AI 助手 ✨\n\n我可以帮你：", false))
-        chatItems.add(ChatItem.Action("📋 查询角色", "请列出所有角色"))
+        chatItems.add(ChatItem.Message("你好！我是星穹铁道 AI 助手 ✨\n\n我可以帮你做这些：", false))
+        chatItems.add(ChatItem.Action("📋 所有角色", "请列出所有角色"))
         chatItems.add(ChatItem.Action("⚔️ 战斗模拟", "模拟希儿战斗"))
         chatItems.add(ChatItem.Action("💎 星魂分析", "希儿星魂提升有多大"))
         chatItems.add(ChatItem.Action("🎯 推荐配队", "配队推荐"))
+        chatItems.add(ChatItem.Action("🏆 光锥推荐", "希儿用什么光锥"))
+        chatItems.add(ChatItem.Action("🛡️ 遗器推荐", "希儿推荐遗器"))
+        chatItems.add(ChatItem.Action("📊 队伍对比", "对比镜流和希儿"))
+        chatItems.add(ChatItem.Action("🔍 查敌人", "可可利亚弱点"))
+        chatItems.add(ChatItem.Action("📈 伤害计算", "希儿打可可利亚伤害"))
+        chatItems.add(ChatItem.Action("🔄 升级建议", "希儿优先升级什么"))
         scope.launch { listState.animateScrollToItem(chatItems.size - 1) }
     }
 
@@ -182,16 +225,34 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(modifier = Modifier.width(300.dp)) {
-                // 头部
+                val context = LocalContext.current
+                // 头部 + 搜索
                 Text(
                     "对话历史",
                     modifier = Modifier.padding(16.dp),
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
+                var drawerSearch by remember { mutableStateOf("") }
+                val searchResults = remember(drawerSearch, conversationList) {
+                    if (drawerSearch.isBlank()) null
+                    else agent.searchConversations(drawerSearch)
+                }
+                OutlinedTextField(
+                    value = drawerSearch,
+                    onValueChange = { drawerSearch = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 4.dp),
+                    placeholder = { Text("搜索对话内容...", fontSize = 13.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                    textStyle = MaterialTheme.typography.bodySmall
+                )
                 HorizontalDivider()
                 
-                if (conversationList.isEmpty()) {
+                val displayList = if (searchResults != null) searchResults else conversationList.toList()
+                
+                if (displayList.isEmpty()) {
                     Text(
                         "暂无历史对话",
                         modifier = Modifier.padding(24.dp),
@@ -201,7 +262,7 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
                 }
                 
                 LazyColumn(modifier = Modifier.weight(1f)) {
-                    items(conversationList.toList()) { (convId, preview) ->
+                    items(displayList) { (convId, preview) ->
                         Surface(
                             onClick = {
                                 // 加载该对话的历史消息
@@ -248,6 +309,23 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
                                 )
                                 IconButton(
                                     onClick = {
+                                        val msgs = agent.getConversationMessages(convId)
+                                        if (msgs.isNotEmpty()) {
+                                            val file = ConversationExporter.exportAsText(context, msgs)
+                                            ConversationExporter.shareFile(context, file)
+                                        }
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Share,
+                                        contentDescription = "导出",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
                                         agent.deleteConversation(convId)
                                         refreshConversationList()
                                     },
@@ -282,6 +360,14 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
                         }
                     },
                     actions = {
+                        IconButton(onClick = onOpenReference) {
+                            Icon(Icons.Default.Book, contentDescription = "游戏资料",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = onOpenGallery) {
+                            Icon(Icons.Default.Person, contentDescription = "角色图鉴",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         IconButton(onClick = { showClearConfirm = true }) {
                             Icon(Icons.Default.Delete, contentDescription = "清空对话",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -348,6 +434,12 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
 
             if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
+            // 快捷操作栏
+            QuickActionBar(onAction = { query ->
+                inputText = query
+                // 如果用户选择了快捷操作，自动发送
+            })
+
             Surface(tonalElevation = 1.dp) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(8.dp),
@@ -387,9 +479,10 @@ fun StarRailChatScreen(agent: StarRailAgent, onOpenSettings: () -> Unit) {
 @Composable
 fun LlmSettingsScreen(
     llmSettings: LlmSettings,
+    settingsState: MutableState<LlmSettingsData>,
     onBack: () -> Unit
 ) {
-    val settings = remember { mutableStateOf(llmSettings.load()) }
+    val settings = settingsState
     var showApiKey by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
     var isTesting by remember { mutableStateOf(false) }
@@ -445,6 +538,31 @@ fun LlmSettingsScreen(
                     Switch(
                         checked = settings.value.enabled,
                         onCheckedChange = { settings.value = settings.value.copy(enabled = it) }
+                    )
+                }
+            }
+
+            // ===== 深色模式 =====
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("深色模式", fontWeight = FontWeight.Medium)
+                        Text(
+                            "切换深色/浅色主题",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = settings.value.darkMode,
+                        onCheckedChange = {
+                            settings.value = settings.value.copy(darkMode = it)
+                            llmSettings.save(settings.value)
+                        }
                     )
                 }
             }
@@ -769,95 +887,33 @@ private fun renderWithCodeBlocks(text: String, modifier: Modifier) {
     }
 }
 
-/** 解析 Markdown 为 AnnotatedString */
-private fun parseMarkdown(text: String): AnnotatedString {
+/** 将 MarkdownParser Segment 列表渲染为 AnnotatedString */
+private fun segmentsToAnnotatedString(segments: List<MarkdownParser.Segment>): AnnotatedString {
     return buildAnnotatedString {
-        val lines = text.split("\n")
-        for ((lineIdx, line) in lines.withIndex()) {
-            if (lineIdx > 0) append("\n")
-            
-            when {
-                line.startsWith("### ") -> {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)) {
-                        append(line.removePrefix("### "))
-                    }
-                }
-                line.startsWith("## ") -> {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 17.sp)) {
-                        append(line.removePrefix("## "))
-                    }
-                }
-                line.startsWith("# ") -> {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 19.sp)) {
-                        append(line.removePrefix("# "))
-                    }
-                }
-                line.matches(Regex("^-{3,}$")) -> {
-                    append("─".repeat(30))
-                }
-                else -> {
-                    val listMatch = Regex("""^(\s*)([-*+]|\d+\.)\s+(.*)""").find(line)
-                    if (listMatch != null) {
-                        val indent = listMatch.groupValues[1]
-                        val marker = listMatch.groupValues[2]
-                        val content = listMatch.groupValues[3]
-                        val bullet = if (marker.all { it.isDigit() }) "$marker " else "• "
-                        if (indent.isNotEmpty()) append("  ".repeat(indent.length / 2))
-                        append(bullet)
-                        append(parseInlineMarkdown(content))
-                    } else {
-                        append(parseInlineMarkdown(line))
-                    }
-                }
+        for (seg in segments) {
+            val style = when (seg.style) {
+                MarkdownParser.Style.BOLD -> SpanStyle(fontWeight = FontWeight.Bold)
+                MarkdownParser.Style.ITALIC -> SpanStyle(fontStyle = FontStyle.Italic)
+                MarkdownParser.Style.CODE -> SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                MarkdownParser.Style.HEADING1 -> SpanStyle(fontWeight = FontWeight.Bold, fontSize = 19.sp)
+                MarkdownParser.Style.HEADING2 -> SpanStyle(fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                MarkdownParser.Style.HEADING3 -> SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                MarkdownParser.Style.BULLET, MarkdownParser.Style.ORDERED -> SpanStyle()
+                MarkdownParser.Style.NORMAL -> SpanStyle()
             }
+            withStyle(style) { append(seg.text) }
         }
     }
 }
 
-/** 解析行内 Markdown 样式 */
+/** 解析 Markdown 为 AnnotatedString（委托给 MarkdownParser） */
+private fun parseMarkdown(text: String): AnnotatedString {
+    return segmentsToAnnotatedString(MarkdownParser.parse(text))
+}
+
+/** 解析行内 Markdown 样式（委托给 MarkdownParser） */
 private fun parseInlineMarkdown(line: String): AnnotatedString {
-    return buildAnnotatedString {
-        var remaining = line
-        while (remaining.isNotEmpty()) {
-            val boldClose = remaining.indexOf("**")
-            val italicClose = remaining.indexOf("*")
-            val codeClose = remaining.indexOf("`")
-            
-            val firstPos = listOf(
-                if (boldClose >= 0) boldClose else Int.MAX_VALUE,
-                if (italicClose >= 0 && (boldClose < 0 || italicClose < boldClose)) italicClose else Int.MAX_VALUE,
-                if (codeClose >= 0) codeClose else Int.MAX_VALUE
-            ).minOrNull() ?: Int.MAX_VALUE
-            
-            if (firstPos == Int.MAX_VALUE) {
-                append(remaining)
-                break
-            }
-            
-            val (endIdx, open, close) = when (firstPos) {
-                boldClose -> Triple(boldClose + 2, "**", "**")
-                italicClose -> Triple(italicClose, "*", "*")
-                else -> Triple(codeClose, "`", "`")
-            }
-            
-            if (firstPos > 0) append(remaining.substring(0, firstPos))
-            
-            val closeLen = close.length
-            val end = remaining.indexOf(close, firstPos + open.length)
-            if (end >= 0) {
-                val content = remaining.substring(firstPos + open.length, end)
-                when (open) {
-                    "**" -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(content) }
-                    "*" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(content) }
-                    "`" -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp)) { append(content) }
-                }
-                remaining = remaining.substring(end + closeLen)
-            } else {
-                append(remaining.substring(firstPos))
-                break
-            }
-        }
-    }
+    return segmentsToAnnotatedString(MarkdownParser.parseInline(line))
 }
 
 @Composable
@@ -903,6 +959,44 @@ fun ActionChip(action: ChatItem.Action, onClick: (String) -> Unit) {
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+// ============================================================
+// 快捷操作栏
+// ============================================================
+/** 分类快捷操作 */
+private data class QuickAction(val label: String, val query: String)
+
+private val quickActions = listOf(
+    QuickAction("🔍 查角色", "希儿信息"),
+    QuickAction("📦 查光锥", "于夜色中信息"),
+    QuickAction("🛡️ 查遗器", "野穗伴行的快枪手"),
+    QuickAction("👾 查敌人", "可可利亚弱点"),
+    QuickAction("⚔️ 战斗模拟", "模拟希儿战斗"),
+    QuickAction("📈 伤害计算", "希儿打可可利亚伤害"),
+    QuickAction("💎 星魂", "希儿星魂提升"),
+    QuickAction("🏆 光锥推荐", "希儿用什么光锥"),
+    QuickAction("🎯 配队", "推荐希儿配队"),
+    QuickAction("🔄 升级", "希儿优先升级"),
+)
+
+@Composable
+fun QuickActionBar(onAction: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        quickActions.forEach { action ->
+            SuggestionChip(
+                onClick = { onAction(action.query) },
+                label = { Text(action.label, fontSize = 12.sp, maxLines = 1) },
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
     }
 }
 

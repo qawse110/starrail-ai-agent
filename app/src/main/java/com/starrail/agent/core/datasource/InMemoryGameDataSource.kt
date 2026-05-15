@@ -838,6 +838,100 @@ class InMemoryGameDataSource {
             resistance = mapOf(ElementType.雷 to 0.30, ElementType.物理 to 0.20),
             stats = BaseStats(hp = 48000.0, attack = 680.0, defense = 920.0, speed = 86.0),
             debuffResistance = 0.25, location = "混沌11层"
+        ),
+        // ===== 新增：模拟宇宙精英 =====
+        Enemy(
+            id = "enemy_016",
+            name = "扑满",
+            level = 70, toughness = 60,
+            weakness = listOf(ElementType.物理, ElementType.雷, ElementType.风, ElementType.虚数),
+            resistance = emptyMap(),
+            stats = BaseStats(hp = 15000.0, attack = 400.0, defense = 500.0, speed = 120.0),
+            debuffResistance = 0.0, location = "模拟宇宙"
+        ),
+        Enemy(
+            id = "enemy_017",
+            name = "自动机兵·齿狼",
+            level = 78, toughness = 200,
+            weakness = listOf(ElementType.冰, ElementType.雷, ElementType.虚数),
+            resistance = mapOf(ElementType.物理 to 0.20, ElementType.火 to 0.20),
+            stats = BaseStats(hp = 40000.0, attack = 620.0, defense = 880.0, speed = 94.0),
+            debuffResistance = 0.20, location = "模拟宇宙"
+        ),
+        Enemy(
+            id = "enemy_018",
+            name = "炽燃徘徊者",
+            level = 79, toughness = 190,
+            weakness = listOf(ElementType.物理, ElementType.冰, ElementType.虚数),
+            resistance = mapOf(ElementType.火 to 0.40, ElementType.风 to 0.20),
+            stats = BaseStats(hp = 36000.0, attack = 700.0, defense = 800.0, speed = 98.0),
+            debuffResistance = 0.15, location = "模拟宇宙"
+        ),
+        // ===== 新增：混沌精英 =====
+        Enemy(
+            id = "enemy_019",
+            name = "云骑骁卫·彦卿",
+            level = 83, toughness = 280,
+            weakness = listOf(ElementType.雷, ElementType.风, ElementType.量子),
+            resistance = mapOf(ElementType.冰 to 0.40, ElementType.物理 to 0.20),
+            stats = BaseStats(hp = 55000.0, attack = 780.0, defense = 1000.0, speed = 108.0),
+            debuffResistance = 0.30, location = "混沌12层"
+        ),
+        Enemy(
+            id = "enemy_020",
+            name = "药王秘传·炼形者",
+            level = 80, toughness = 240,
+            weakness = listOf(ElementType.火, ElementType.雷, ElementType.风),
+            resistance = mapOf(ElementType.物理 to 0.20, ElementType.虚数 to 0.20),
+            stats = BaseStats(hp = 50000.0, attack = 650.0, defense = 950.0, speed = 82.0),
+            debuffResistance = 0.25, location = "混沌10层"
+        ),
+        // ===== 新增：周常Boss =====
+        Enemy(
+            id = "enemy_021",
+            name = "幻胧",
+            level = 85, toughness = 350,
+            weakness = listOf(ElementType.火, ElementType.雷, ElementType.风, ElementType.虚数),
+            resistance = mapOf(ElementType.物理 to 0.40, ElementType.冰 to 0.40, ElementType.量子 to 0.30),
+            stats = BaseStats(hp = 90000.0, attack = 900.0, defense = 1300.0, speed = 78.0),
+            debuffResistance = 0.40, location = "周本"
+        ),
+        Enemy(
+            id = "enemy_022",
+            name = "碎星王虫·斯喀拉卡巴兹",
+            level = 84, toughness = 320,
+            weakness = listOf(ElementType.火, ElementType.雷, ElementType.风),
+            resistance = mapOf(ElementType.物理 to 0.30, ElementType.量子 to 0.30, ElementType.虚数 to 0.20),
+            stats = BaseStats(hp = 85000.0, attack = 850.0, defense = 1150.0, speed = 72.0),
+            debuffResistance = 0.35, location = "模拟宇宙"
+        ),
+        // ===== 新增：活动精英 =====
+        Enemy(
+            id = "enemy_023",
+            name = "惊梦剧团的弹簧荷官",
+            level = 77, toughness = 180,
+            weakness = listOf(ElementType.物理, ElementType.冰, ElementType.虚数),
+            resistance = mapOf(ElementType.雷 to 0.20, ElementType.火 to 0.20),
+            stats = BaseStats(hp = 34000.0, attack = 580.0, defense = 780.0, speed = 100.0),
+            debuffResistance = 0.15, location = "匹诺康尼"
+        ),
+        Enemy(
+            id = "enemy_024",
+            name = "忆域迷因·狂怒褪去之壳",
+            level = 81, toughness = 260,
+            weakness = listOf(ElementType.物理, ElementType.火, ElementType.风),
+            resistance = mapOf(ElementType.雷 to 0.30, ElementType.冰 to 0.20, ElementType.虚数 to 0.20),
+            stats = BaseStats(hp = 52000.0, attack = 720.0, defense = 1050.0, speed = 88.0),
+            debuffResistance = 0.25, location = "匹诺康尼"
+        ),
+        Enemy(
+            id = "enemy_025",
+            name = "忆域迷因·何物朝向死亡",
+            level = 82, toughness = 300,
+            weakness = listOf(ElementType.火, ElementType.雷, ElementType.量子),
+            resistance = mapOf(ElementType.物理 to 0.30, ElementType.风 to 0.30, ElementType.虚数 to 0.20),
+            stats = BaseStats(hp = 58000.0, attack = 800.0, defense = 1100.0, speed = 92.0),
+            debuffResistance = 0.30, location = "匹诺康尼"
         )
     )
 }

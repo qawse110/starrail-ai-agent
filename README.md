@@ -7,16 +7,17 @@
 
 | 模块 | 能力 | 状态 |
 |------|------|------|
-| 🤖 **LLM 智能对话** | 自然语言理解 + Function Calling 调用游戏工具 | ✅ |
+| 🤖 **LLM 智能对话** | 自然语言理解 + Function Calling 调用17个游戏工具 | ✅ |
 | ⚔️ **战斗模拟** | 7乘区伤害公式计算、回合推演 | ✅ |
-| 💎 **遗器分析** | 遗器评分（3大维度）、套装推荐、升级建议 | ✅ |
+| 💎 **遗器分析** | 遗器评分（3大维度）、套装推荐（按命途匹配）、升级建议 | ✅ |
 | 👥 **配队对比** | 队伍协同分析（元素/命途/技能）、DPS 估算 | ✅ |
 | ⬆️ **星魂提升** | 星魂收益曲线、精炼性价比、升级路径优化 | ✅ |
-| 📊 **Markdown 渲染** | AI 回复支持加粗/斜体/代码块/标题等格式 | ✅ |
+| 📊 **Markdown 渲染** | AI 回复支持加粗/斜体/代码块/标题/列表/分割线 | ✅ |
 | 📋 **一键复制** | AI 回复内容复制到剪贴板 | ✅ |
+| 📜 **对话历史** | 侧边栏查看/切换/删除历史对话 | ✅ |
+| 🎯 **智能滚动** | 阅读历史时不自动滚动，底部 FAB 一键到底 | ✅ |
 | 💾 **数据持久化** | 玩家数据以 JSON 文件实时写入设备存储 | ✅ |
-| 🔧 **LLM 配置** | 应用内配置 API Key / 端点 / 模型 / 温度参数 | ✅ |
-| 🎯 **智能滚动** | 阅读历史时不自动滚动，新消息到达时自动到底 | ✅ |
+| 🔧 **LLM 配置** | 应用内配置 API Key / 端点 / 模型 / 温度参数 + 测试连接 | ✅ |
 
 ## 🏗️ 项目架构
 
@@ -24,8 +25,9 @@
 app/src/main/java/com/starrail/agent/
 ├── core/
 │   ├── model/              # 领域模型（角色/光锥/遗器/敌人等）
-│   ├── datasource/         # 20名角色 + 8光锥 + 10遗器套 + 4敌人的内置数据
-│   └── damage/             # 7乘区伤害公式计算器
+│   ├── datasource/         # 40名角色 + 40光锥 + 42遗器套 + 25敌人 内置数据
+│   ├── util/               # MarkdownParser（独立可测试的解析器）
+│   └── json/               # JSON 解析/序列化
 ├── player/
 │   ├── PlayerData.kt       # 玩家数据模型
 │   └── db/                 # 持久化层（FilePlayerDao + JSON序列化）
@@ -38,7 +40,7 @@ app/src/main/java/com/starrail/agent/
 │   ├── llm/                # LLM 服务（OpenAI API + DSML解析器）
 │   │   ├── LlmService.kt   # LLM 接口抽象
 │   │   └── OpenAiLlmService.kt  # OpenAI/DeepSeek 实现
-│   ├── tool/               # 17个工具执行器（含6个数据查询工具）
+│   ├── tool/               # 17个工具执行器（含按命途推荐的遗器配装）
 │   ├── report/             # 报告生成器（6种报告模板）
 │   └── StarRailAgent.kt    # Agent 编排器（LLM + 规则双模式）
 ├── settings/               # LLM 配置持久化（SharedPreferences）
@@ -63,19 +65,16 @@ LLM 模式（默认）                   规则模式（回退）
 ### 编译运行
 
 ```bash
-# 克隆项目
-git clone <repo-url>
-
 # 编译 APK
 ./gradlew :app:assembleDebug
 
-# 运行单元测试
+# 运行单元测试（126项）
 ./gradlew :app:testDebugUnitTest
 ```
 
 ### 配置 LLM
 
-1. 打开应用，点击右上角 ⚙️ 进入设置
+1. 打开应用，点击左上角 ☰ → ⚙️ 进入设置
 2. 开启「启用 LLM」
 3. 选择提供商（DeepSeek / OpenAI / Gemini / 自定义）
 4. 填入 API Key
@@ -90,13 +89,13 @@ git clone <repo-url>
 ### 使用示例
 
 ```
-"列出所有角色"
-"希儿的技能是什么"
-"模拟希儿打混沌12层"
-"给希儿遗器评分"
-"推荐配队"
-"先补星魂还是先抽专武"
-"银狼星魂提升有多大"
+"列出所有角色"                                              → 返回全部40名角色
+"希儿的技能是什么"                                          → 角色详情查询
+"模拟希儿打可可利亚"                                        → 战斗模拟
+"给希儿推荐遗器配装"                                        → 按命途推荐遗器套装
+"银狼星魂提升有多大"                                        → 星魂收益分析
+"先补星魂还是先抽专武"                                      → 升级路径对比
+"推荐混沌12层配队"                                          → 配队推荐
 ```
 
 ## 🧪 测试覆盖
@@ -109,15 +108,28 @@ git clone <repo-url>
 | TeamAnalyzer | 11 | 协同/命途/元素/DPS估算 |
 | UpgradeAnalyzer | 14 | 星魂/精炼/性价比曲线 |
 | FilePlayerDao | 20 | JSON 持久化完整 CRUD |
-| **总计** | **91** | 全部通过 ✅ |
+| InMemoryGameDataSource | 16 | 全部数据查询 API 完整性 |
+| MarkdownParser | 19 | 标题/列表/粗体/斜体/代码块解析 |
+| **总计** | **126** | 全部通过 ✅ |
+
+## 📊 数据源规模
+
+| 数据 | 数量 | 覆盖范围 |
+|------|------|---------|
+| 角色 | **40 名** | 五星30+四星10，含全部主流限定 |
+| 光锥 | **40 个** | 五星18+四星22，适配7个命途 |
+| 遗器套装 | **42 套** | 遗器23套+位面饰品18套 |
+| 敌人 | **25 个** | 周本Boss/混沌精英/模拟宇宙/活动 |
+| LLM 提供商 | **4 种** | DeepSeek / OpenAI / Gemini / 自定义 |
 
 ## 📊 代码统计
 
 | 指标 | 值 |
 |------|-----|
-| 源码文件 | **29** |
-| 总代码行 | **~8,000** |
-| 编译 | 0 errors |
+| 源码文件 | **33+** |
+| 单元测试 | **126 项** |
+| 编译 | 0 errors ✅ |
+| APK | 构建成功 ✅ |
 | SDK | minSdk 24 / targetSdk 35 |
 | UI 框架 | Jetpack Compose + Material3 |
 | 构建系统 | Gradle + Kotlin DSL |
@@ -144,5 +156,6 @@ git clone <repo-url>
 
 - [崩坏星穹铁道官网](https://sr.mihoyo.com/)
 - [Huroka Database](https://www.huroka.com/)
+- [Project Yatta](https://sr.yatta.moe/)
 - [DeepSeek API 文档](https://platform.deepseek.com/)
 - [OpenAI API 文档](https://platform.openai.com/)

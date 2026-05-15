@@ -127,48 +127,124 @@ class ToolExecutor(
     // === 战斗模拟工具 ===
     
     private fun executeSimulateBattle(parameters: Map<String, Any?>): Map<String, Any> {
-        val characterId = parameters["character_id"] as? String ?: ""
-        val targetEnemy = parameters["target_enemy"] as? String ?: "default"
+        val characterId = getParam(parameters, "character_id", "name", "character_name") ?: ""
+        val targetEnemy = getParam(parameters, "target_enemy", "enemy_name", "target") ?: ""
+        val ds = dataSource
+
+        // 查找角色和敌人
+        val char = ds?.searchCharacters(characterId)?.firstOrNull()
+        val enemy = ds?.searchEnemies(targetEnemy)?.firstOrNull()
         
-        // 简化模拟结果
+        // 构建攻击者属性（基础属性 + 装备加成）
+        val baseAtk = char?.baseStats?.attack ?: 700.0
+        val baseHp = char?.baseStats?.hp ?: 900.0
+        val baseSpd = char?.baseStats?.speed ?: 100.0
+        
+        val attackerStats = CombatStats(
+            level = 80,
+            attack = baseAtk * 3.5,  // 假设装备加成约250%
+            defense = char?.baseStats?.defense ?: 400.0 * 2.0,
+            maxHp = baseHp * 3.0,
+            speed = baseSpd + 20,  // 副词条补正
+            critRate = 0.65,
+            critDmg = 1.50
+        )
+        
+        // 构建敌人防御属性
+        val defenderStats = EnemyDefensiveStats(
+            defense = enemy?.stats?.defense ?: 800.0,
+            resistance = enemy?.resistance?.values?.average()?.takeIf { it > 0 } ?: 0.2,
+            toughness = enemy?.toughness ?: 200
+        )
+        
+        // 使用 DamageCalculator 计算
+        val basicSkill = char?.skills?.firstOrNull { it.type == SkillType.BASIC } 
+            ?: Skill("basic", SkillType.BASIC, "普攻", "", listOf(ScalingEntry(StatType.ATK, 1.0)))
+        val ultSkill = char?.skills?.firstOrNull { it.type == SkillType.ULTIMATE }
+            ?: Skill("ult", SkillType.ULTIMATE, "终结技", "", listOf(ScalingEntry(StatType.ATK, 4.0)))
+        
+        val context = DamageContext(critRoll = 0.3) // 70%暴击率下期望
+        val expectedDamage = damageCalculator.calculateExpectedDamage(
+            attackerStats, defenderStats, basicSkill, context
+        )
+        val ultDamage = damageCalculator.calculateExpectedDamage(
+            attackerStats, defenderStats, ultSkill, context
+        )
+        
+        // 估算击杀轮数
+        val enemyHp = enemy?.stats?.hp ?: 40000.0
+        val totalCycleDmg = expectedDamage * 2 + ultDamage * 1  // 2普攻+1终结技每轮
+        val cycles = if (totalCycleDmg > 0) kotlin.math.ceil(enemyHp / totalCycleDmg).toInt().coerceAtLeast(1) else 3
+        
         return mapOf(
-            "character_id" to characterId,
-            "target" to targetEnemy,
-            "estimated_damage" to 50000.0,
-            "cycles" to 3,
-            "sp_used" to 8,
-            "summary" to "${characterId}击败目标预计需要3轮"
+            "character" to (char?.name ?: characterId),
+            "target" to (enemy?.name ?: targetEnemy),
+            "character_base_atk" to baseAtk,
+            "estimated_basic_damage" to expectedDamage,
+            "estimated_ult_damage" to ultDamage,
+            "estimated_cycles" to cycles,
+            "enemy_hp" to enemyHp,
+            "enemy_toughness" to (enemy?.toughness ?: 200),
+            "enemy_location" to (enemy?.location ?: "未知"),
+            "summary" to "${char?.name ?: characterId} 对 ${enemy?.name ?: targetEnemy} 的普攻期望伤害约 ${"%.0f".format(expectedDamage)}，终结技约 ${"%.0f".format(ultDamage)}，预计 ${cycles} 轮击杀"
         )
     }
     
     private fun executeCalculateDamage(parameters: Map<String, Any?>): Map<String, Any> {
+        val characterId = getParam(parameters, "character_id", "name") ?: ""
+        val enemyName = getParam(parameters, "target_enemy", "enemy_name") ?: ""
+        val ds = dataSource
+        
+        val char = ds?.searchCharacters(characterId)?.firstOrNull()
+        val enemy = ds?.searchEnemies(enemyName)?.firstOrNull()
+        
+        // 使用角色真实数据构建战斗属性
+        val baseAtk = char?.baseStats?.attack ?: 700.0
+        val baseHp = char?.baseStats?.hp ?: 900.0
+        val baseSpd = char?.baseStats?.speed ?: 100.0
+        
         val attackerStats = CombatStats(
             level = 80,
-            attack = 3000.0,
-            defense = 1000.0,
-            maxHp = 15000.0,
-            speed = 120.0,
-            critRate = 0.7,
-            critDmg = 1.8
+            attack = baseAtk * 3.5,
+            defense = char?.baseStats?.defense ?: 400.0 * 2.0,
+            maxHp = baseHp * 3.0,
+            speed = baseSpd + 15,
+            critRate = (char?.baseStats?.critRate ?: 0.05) + 0.60,  // 装备补正
+            critDmg = (char?.baseStats?.critDmg ?: 0.50) + 1.0
         )
         
         val defenderStats = EnemyDefensiveStats(
-            defense = 800.0,
-            resistance = 0.2,
-            toughness = 200
+            defense = enemy?.stats?.defense ?: 800.0,
+            resistance = enemy?.resistance?.values?.average()?.takeIf { it > 0 } ?: 0.2,
+            toughness = enemy?.toughness ?: 200
         )
         
         val context = DamageContext(critRoll = 0.5)
-        val expectedDamage = damageCalculator.calculateExpectedDamage(
-            attackerStats, defenderStats, 
-            Skill("basic", SkillType.BASIC, "普攻", "", listOf(ScalingEntry(StatType.ATK, 1.0))),
-            context
+        val skills = char?.skills?.take(2) ?: listOf(
+            Skill("basic", SkillType.BASIC, "普攻", "", listOf(ScalingEntry(StatType.ATK, 1.0)))
         )
         
+        val results = skills.map { skill ->
+            val dmg = damageCalculator.calculateExpectedDamage(attackerStats, defenderStats, skill, context)
+            mapOf("skill" to skill.name, "expected_damage" to dmg)
+        }
+        
         return mapOf(
-            "expected_damage" to expectedDamage,
-            "crit_damage" to expectedDamage * 1.8,
-            "raw_damage" to expectedDamage / (1 + 0.7 * 1.8)
+            "character" to (char?.name ?: characterId),
+            "target" to (enemy?.name ?: enemyName),
+            "attacker_stats" to mapOf(
+                "attack" to attackerStats.attack,
+                "crit_rate" to attackerStats.critRate,
+                "crit_dmg" to attackerStats.critDmg,
+                "speed" to attackerStats.speed
+            ),
+            "defender_stats" to mapOf(
+                "defense" to defenderStats.defense,
+                "resistance" to defenderStats.resistance,
+                "toughness" to defenderStats.toughness
+            ),
+            "damage_results" to results,
+            "summary" to "${char?.name ?: characterId} 对 ${enemy?.name ?: enemyName} 的各技能期望伤害: ${results.joinToString(" | ") { "${it["skill"]}: ${"%.0f".format(it["expected_damage"])}" }}"
         )
     }
     
@@ -383,27 +459,94 @@ class ToolExecutor(
         val char = ds.searchCharacters(name).firstOrNull()
             ?: return mapOf("error" to "未找到角色: $name")
         
-        // 根据命途推荐
-        val relicSets = ds.getAllRelicSets()
-        val twoPiece = relicSets.firstOrNull()?.name ?: "未知"
-        val fourPiece = relicSets.drop(1).firstOrNull()?.name ?: "未知"
+        // 根据命途和属性推荐实际遗器套装
+        val allSets = ds.getAllRelicSets()
+        val path = char.path
+        val element = char.element
         
-        val recommendedMainStats = when (char.path) {
-            PathType.毁灭, PathType.巡猎, PathType.智识 -> 
-                listOf("躯干: 暴击率/暴击伤害", "脚部: 速度/攻击%", "位面球: 属性伤害加成", "连结绳: 攻击%/充能")
-            PathType.同谐, PathType.虚无 -> 
-                listOf("躯干: 暴击率/效果命中", "脚部: 速度", "位面球: 攻击%", "连结绳: 充能")
-            PathType.存护, PathType.丰饶 -> 
-                listOf("躯干: 生命%/防御%", "脚部: 速度", "位面球: 生命%/防御%", "连结绳: 充能/生命%")
+        // 通用输出套装（2件套+4件套）
+        val generalDps2pc = allSets.filter { it.type == RelicSetType.ORNAMENT }
+            .filter { s -> s.setBonuses.any { it.effects.any { e ->
+                e.type == EffectType.CRIT_RATE_UP || e.type == EffectType.CRIT_DMG_UP || e.type == EffectType.ATK_UP
+            }}}
+        val generalDps4pc = allSets.filter { it.type == RelicSetType.RELIC }
+            .filter { s -> s.setBonuses.any { it.effects.any { e ->
+                e.type == EffectType.CRIT_RATE_UP || e.type == EffectType.CRIT_DMG_UP || e.type == EffectType.DMG_UP
+            }}}
+        
+        // 根据命途选择推荐
+        val (recommended4pc, recommended2pc) = when (path) {
+            PathType.巡猎, PathType.毁灭, PathType.智识 -> {
+                val four = generalDps4pc.take(3).map { it.name }
+                val two = generalDps2pc.take(3).map { it.name }
+                four to two
+            }
+            PathType.同谐, PathType.虚无 -> {
+                val four = allSets.filter { it.type == RelicSetType.RELIC }
+                    .take(3).map { it.name }
+                val two = generalDps2pc.filter { s ->
+                    s.setBonuses.any { it.effects.any { e ->
+                        e.type == EffectType.ENERGY_REGEN_UP
+                    }}
+                }.take(3).map { it.name }
+                four to two
+            }
+            PathType.存护 -> {
+                val four = allSets.filter { it.type == RelicSetType.RELIC }
+                    .filter { s -> s.setBonuses.any { it.effects.any { e ->
+                        e.type == EffectType.DEF_UP || e.type == EffectType.HP_UP
+                    }}}
+                    .take(3).map { it.name }
+                val two = allSets.filter { it.type == RelicSetType.ORNAMENT }
+                    .filter { s -> s.setBonuses.any { it.effects.any { e ->
+                        e.type == EffectType.DEF_UP || e.type == EffectType.EFFECT_RES_UP
+                    }}}
+                    .take(3).map { it.name }
+                four to two
+            }
+            PathType.丰饶 -> {
+                val four = allSets.filter { it.type == RelicSetType.RELIC }
+                    .filter { s -> s.setBonuses.any { it.effects.any { e ->
+                        e.type == EffectType.HP_UP
+                    }}}
+                    .take(3).map { it.name }
+                val two = allSets.filter { it.type == RelicSetType.ORNAMENT }
+                    .filter { s -> s.setBonuses.any { it.effects.any { e ->
+                        e.type == EffectType.HP_UP || e.type == EffectType.ENERGY_REGEN_UP
+                    }}}
+                    .take(3).map { it.name }
+                four to two
+            }
+            else -> generalDps4pc.take(3).map { it.name } to generalDps2pc.take(3).map { it.name }
+        }
+        
+        val recommendedMainStats = when (path) {
+            PathType.毁灭, PathType.巡猎 -> 
+                listOf("躯干: 暴击率/暴击伤害", "脚部: 速度/攻击%", "位面球: ${element.name}伤害加成", "连结绳: 攻击%/充能")
+            PathType.智识 -> 
+                listOf("躯干: 暴击率/暴击伤害", "脚部: 速度/攻击%", "位面球: ${element.name}伤害加成", "连结绳: 攻击%/充能")
+            PathType.同谐 -> 
+                listOf("躯干: 暴击率/生命%", "脚部: 速度", "位面球: 生命%/攻击%", "连结绳: 充能")
+            PathType.虚无 -> 
+                listOf("躯干: 效果命中/暴击率", "脚部: 速度", "位面球: 攻击%/${element.name}伤害", "连结绳: 充能/攻击%")
+            PathType.存护 -> 
+                listOf("躯干: 防御%/生命%", "脚部: 速度/防御%", "位面球: 防御%/生命%", "连结绳: 充能/防御%")
+            PathType.丰饶 -> 
+                listOf("躯干: 治疗加成/生命%", "脚部: 速度", "位面球: 生命%", "连结绳: 充能/生命%")
             else -> listOf("躯干: 暴击率", "脚部: 速度", "位面球: 攻击%", "连结绳: 攻击%")
         }
         
         return mapOf(
             "character" to char.name,
-            "path" to char.path.displayName,
-            "element" to char.element.name,
-            "recommended_relics" to mapOf("二件套" to twoPiece, "四件套" to fourPiece),
-            "recommended_main_stats" to recommendedMainStats
+            "path" to path.displayName,
+            "element" to element.name,
+            "rarity" to "${char.rarity}星",
+            "recommended_relics" to mapOf(
+                "四件套推荐" to recommended4pc,
+                "二件套推荐" to recommended2pc
+            ),
+            "recommended_main_stats" to recommendedMainStats,
+            "summary" to "${char.name}（${path.displayName}·${element.name}）推荐使用 ${recommended4pc.firstOrNull() ?: "输出"} 四件套 + ${recommended2pc.firstOrNull() ?: "通用"} 二件套"
         )
     }
 // === 升级分析工具 ===

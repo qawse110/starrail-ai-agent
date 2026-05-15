@@ -20,10 +20,12 @@ import java.util.UUID
  * 2. 规则模式（离线）：通过 `process()` 调用，规则匹配 + 模板报告
  */
 class StarRailAgent(
-    private val llmService: LlmService? = null
+    private val llmService: LlmService? = null,
+    private val conversationRepo: ConversationRepository? = null
 ) {
     
-    private val gameDataSource = InMemoryGameDataSource()
+    /** 游戏数据源 */
+    val gameDataSource = InMemoryGameDataSource()
     private val intentResolver = IntentResolver()
     private val toolExecutor = ToolExecutor(
         relicScorer = RelicScorer(),
@@ -37,6 +39,18 @@ class StarRailAgent(
     
     /** LLM 驱动的对话历史 */
     private val llmConversations = mutableMapOf<String, MutableList<LlmMessage>>()
+    
+    init {
+        // 启动时从持久化仓库加载对话
+        conversationRepo?.let { repo ->
+            for (convId in repo.listConversations()) {
+                val messages = repo.loadConversation(convId)
+                if (messages != null && messages.isNotEmpty()) {
+                    llmConversations[convId] = messages.toMutableList()
+                }
+            }
+        }
+    }
     
     companion object {
         private const val MAX_MESSAGES_PER_CONVERSATION = 50
@@ -62,9 +76,9 @@ class StarRailAgent(
         appendLine("- 属性：物理、火、冰、雷、风、虚数、量子")
         appendLine("- 角色稀有度：4星 / 5星")
         appendLine("- 遗器槽位：头部、手部、躯干、脚部、位面球、连结绳")
-        appendLine("- 遗器套装分两种：遗器（4件套）和位面饰品（2件套）")
+        appendLine("- 遗器套装分两种：遗器（4件套）和位面饰品（2件套）— 共42套")
+        appendLine("- 光锥适配特定命途，精炼1~5阶 — 共32个光锥（18五星+14四星）")
         appendLine("- 星魂等级：0~6魂，关键星魂通常为 1、2、4、6")
-        appendLine("- 光锥精炼：1~5阶")
         appendLine()
         appendLine("## 可用的工具")
         appendLine("当用户询问游戏数据时，使用对应工具查询。")
@@ -75,6 +89,15 @@ class StarRailAgent(
         appendLine("- 回答结构清晰，适当使用分段和要点")
         appendLine("- 给出具体数字和分析，不只是泛泛而谈")
         appendLine("- 如果不确定具体数据，诚实告知用户")
+    }
+
+    /** 保存对话到持久化仓库（同步写入） */
+    private fun saveConversation(convId: String) {
+        conversationRepo?.let { repo ->
+            llmConversations[convId]?.let { msgs ->
+                repo.saveConversation(convId, msgs)
+            }
+        }
     }
 
     /**
@@ -110,23 +133,27 @@ class StarRailAgent(
             }
 
             // 处理工具调用
-            if (response.toolCalls.isNotEmpty()) {
+            val reply = if (response.toolCalls.isNotEmpty()) {
                 handleToolCalls(convId, history, response.toolCalls, messages, response.reasoningContent)
             } else {
                 // 纯文本回复
-                val reply = response.content ?: "抱歉，我没有理解您的问题。"
+                val text = response.content ?: "抱歉，我没有理解您的问题。"
                 history.add(LlmMessage(
                     role = LlmRole.ASSISTANT,
-                    content = reply,
-                    reasoningContent = response.reasoningContent  // 保存推理内容
+                    content = text,
+                    reasoningContent = response.reasoningContent
                 ))
-                reply
+                text
             }
+            // 自动持久化
+            saveConversation(convId)
+            reply
         } catch (e: Exception) {
             // LLM 不可用时回退到规则引擎
             val fallback = process(userInput, convId)
             val text = fallback.report?.toFormattedText() ?: "处理失败"
             history.add(LlmMessage(LlmRole.ASSISTANT, text))
+            saveConversation(convId)
             text
         }
     }
@@ -284,7 +311,11 @@ class StarRailAgent(
     fun getRelicSets(): List<String> = gameDataSource.getAllRelicSets().map { it.name }
     fun getLightCones(): List<String> = gameDataSource.getAllLightCones().map { "${it.name} (${it.path.displayName})" }
     fun getEnemies(): List<String> = gameDataSource.getAllEnemies().map { "${it.name} - Lv.${it.level}" }
-    fun clearConversation(conversationId: String) { conversations.remove(conversationId); llmConversations.remove(conversationId) }
+    fun clearConversation(conversationId: String) { 
+        conversations.remove(conversationId)
+        llmConversations.remove(conversationId)
+        conversationRepo?.deleteConversation(conversationId)
+    }
     
     // ============================================================
     // 对话管理 API
@@ -292,22 +323,83 @@ class StarRailAgent(
     
     /** 获取对话列表 [(id, 预览文本)] */
     fun getConversationList(): List<Pair<String, String>> {
-        return llmConversations.map { (id, msgs) ->
+        // 从 LLM 对话获取
+        val llmEntries = llmConversations.map { (id, msgs) ->
             val preview = msgs.filter { it.role == LlmRole.USER }
                 .firstOrNull()?.content?.take(40) ?: "空对话"
             id to preview
+        }.toMutableList()
+        // 从规则引擎对话获取（补充不在 llmConversations 中的）
+        val processEntries = conversations.map { (id, ctx) ->
+            val preview = ctx.messages.firstOrNull()?.content?.take(40) ?: "空对话"
+            id to preview
         }
+        // 从持久化仓库加载未在内存中的
+        conversationRepo?.let { repo ->
+            val loadedIds = (llmConversations.keys + conversations.keys).toSet()
+            for (convId in repo.listConversations()) {
+                if (convId !in loadedIds) {
+                    val msgs = repo.loadConversation(convId)
+                    if (msgs != null && msgs.isNotEmpty()) {
+                        llmConversations[convId] = msgs.toMutableList()
+                        llmEntries.add(convId to (msgs.filter { it.role == LlmRole.USER }
+                            .firstOrNull()?.content?.take(40) ?: "空对话"))
+                    }
+                }
+            }
+        }
+        return (llmEntries + processEntries).distinctBy { it.first }
     }
     
     /** 获取对话的完整消息列表 */
     fun getConversationMessages(convId: String): List<LlmMessage> {
-        return llmConversations[convId] ?: emptyList()
+        // 先查 LLM 对话，再查规则引擎对话
+        llmConversations[convId]?.let { return it }
+        conversations[convId]?.let { ctx ->
+            return ctx.messages.map { 
+                LlmMessage(LlmRole.USER, it.content ?: "")
+            }
+        }
+        return emptyList()
+    }
+    
+    /** 搜索对话内容 */
+    fun searchConversations(query: String): List<Pair<String, String>> {
+        val q = query.lowercase()
+        val results = mutableListOf<Pair<String, String>>()
+        
+        // 搜索 LLM 对话
+        for ((id, msgs) in llmConversations) {
+            for (msg in msgs) {
+                val content = msg.content ?: continue
+                if (content.lowercase().contains(q)) {
+                    val preview = content.take(60).replace("\n", " ")
+                    results.add(id to preview)
+                    break
+                }
+            }
+        }
+        
+        // 搜索规则引擎对话
+        for ((id, ctx) in conversations) {
+            for (msg in ctx.messages) {
+                val content = msg.content ?: continue
+                if (content.lowercase().contains(q)) {
+                    val preview = content.take(60).replace("\n", " ")
+                    results.add(id to preview)
+                    break
+                }
+            }
+        }
+        
+        return results.distinctBy { it.first }
     }
     
     /** 删除指定对话 */
     fun deleteConversation(convId: String) {
         llmConversations.remove(convId)
         conversations.remove(convId)
+        conversationRepo?.deleteConversation(convId)
     }
 }
 
