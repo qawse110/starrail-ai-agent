@@ -1,0 +1,23 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.kotlin/
+
+# Operit 工作区文件
+.operit/
+.backup/
+
+# 临时 HTML 抓取/脚本
+huroka_page.html
+setup_android_env.sh
+
+# 覆盖子目录 build 目录
+app/build/
+*/build/
