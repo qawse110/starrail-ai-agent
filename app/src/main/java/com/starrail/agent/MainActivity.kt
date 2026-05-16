@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -59,6 +60,10 @@ import com.starrail.agent.agent.ConversationExporter
 import com.starrail.agent.agent.ConversationRepository
 import com.starrail.agent.agent.StarRailAgent
 import com.starrail.agent.agent.llm.LlmConfig
+import com.starrail.agent.core.sync.WikiDataSyncManager
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.starrail.agent.agent.llm.OpenAiLlmService
 import com.starrail.agent.player.db.AppDatabase
 import com.starrail.agent.settings.LlmProvider
@@ -1010,11 +1015,23 @@ fun DataManagementCard() {
     
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var syncProgress by remember { mutableStateOf<String?>(null) }
+    var isSyncing by remember { mutableStateOf(false) }
     
     // 读取当前数据状态
     val charCount = remember { dao.getAllCharacters().size }
     val lcCount = remember { dao.getAllLightCones().size }
     val relicCount = remember { dao.getAllRelics().size }
+    
+    // 检查是否有缓存的 wiki 数据
+    val wikiDataFile = remember { File(context.filesDir, "wiki_data.json") }
+    val wikiDataSize = remember { if (wikiDataFile.exists()) "${wikiDataFile.length() / 1024}KB" else "无" }
+    val syncTime = remember {
+        if (wikiDataFile.exists()) {
+            val date = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+            date.format(java.util.Date(wikiDataFile.lastModified()))
+        } else null
+    }
     
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -1028,17 +1045,64 @@ fun DataManagementCard() {
             
             // 统计数据
             Text(
-                "角色: $charCount | 光锥: $lcCount | 遗器: $relicCount",
+                "玩家数据 — 角色: $charCount | 光锥: $lcCount | 遗器: $relicCount",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(
-                "存储: ${context.filesDir.absolutePath}/player_data/",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (syncTime != null) {
+                Text(
+                    "Wiki数据 — $wikiDataSize (同步于 $syncTime)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             
             Spacer(modifier = Modifier.height(12.dp))
+            
+            // 同步进度
+            if (isSyncing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
+                if (syncProgress != null) {
+                    Text(
+                        syncProgress!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+            
+            // 同步按钮
+            OutlinedButton(
+                onClick = {
+                    isSyncing = true
+                    syncProgress = "正在获取数据列表..."
+                    kotlinx.coroutines.MainScope().launch {
+                        val syncManager = WikiDataSyncManager(context.filesDir)
+                        val result = withContext(Dispatchers.IO) {
+                            syncManager.syncAll { progress ->
+                                syncProgress = "${progress.stage}: ${progress.current}/${progress.total} ${progress.message}"
+                            }
+                        }
+                        isSyncing = false
+                        if (result.success) {
+                            val size = if (wikiDataFile.exists()) "${wikiDataFile.length() / 1024}KB" else "?"
+                            statusMessage = "✅ Wiki数据同步完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 ($size)"
+                        } else {
+                            statusMessage = "⚠️ 同步部分完成 (${result.errors.size}个错误)，${result.charactersCount}角色 + ${result.lightConesCount}光锥"
+                        }
+                        syncProgress = null
+                    }
+                },
+                enabled = !isSyncing,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(if (isSyncing) "同步中..." else "🔄 Wiki数据同步")
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
             
             // 清除数据按钮
             OutlinedButton(
@@ -1058,7 +1122,8 @@ fun DataManagementCard() {
                 Text(
                     statusMessage!!,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
+                    color = if (statusMessage!!.startsWith("✅")) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error
                 )
             }
         }
