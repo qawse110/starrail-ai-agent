@@ -202,6 +202,8 @@ class ToolExecutor(
         val baseAtk = char?.baseStats?.attack ?: 700.0
         val baseHp = char?.baseStats?.hp ?: 900.0
         val baseSpd = char?.baseStats?.speed ?: 100.0
+        val baseCritRate = char?.baseStats?.critRate ?: 0.05
+        val baseCritDmg = char?.baseStats?.critDmg ?: 0.50
         
         val attackerStats = CombatStats(
             level = 80,
@@ -209,8 +211,10 @@ class ToolExecutor(
             defense = char?.baseStats?.defense ?: 400.0 * 2.0,
             maxHp = baseHp * 3.0,
             speed = baseSpd + 15,
-            critRate = (char?.baseStats?.critRate ?: 0.05) + 0.60,  // 装备补正
-            critDmg = (char?.baseStats?.critDmg ?: 0.50) + 1.0
+            critRate = baseCritRate + 0.60,
+            critDmg = baseCritDmg + 1.0,
+            elementalDmgBonus = 0.389,  // 位面球38.9%
+            dmgBonus = 0.0
         )
         
         val defenderStats = EnemyDefensiveStats(
@@ -219,32 +223,74 @@ class ToolExecutor(
             toughness = enemy?.toughness ?: 200
         )
         
+        // 计算全部技能伤害+乘区分解
         val context = DamageContext(critRoll = 0.5)
-        val skills = char?.skills?.take(2) ?: listOf(
+        val skills = char?.skills ?: listOf(
             Skill("basic", SkillType.BASIC, "普攻", "", listOf(ScalingEntry(StatType.ATK, 1.0)))
         )
         
         val results = skills.map { skill ->
-            val dmg = damageCalculator.calculateExpectedDamage(attackerStats, defenderStats, skill, context)
-            mapOf("skill" to skill.name, "expected_damage" to dmg)
+            val result = damageCalculator.calculateDamage(attackerStats, defenderStats, skill, context)
+            mapOf(
+                "skill" to skill.name,
+                "type" to skill.type.name,
+                "base_damage" to result.breakdown.baseDamage,
+                "multiplier_zone" to result.breakdown.multiplierZone,
+                "bonus_zone" to result.breakdown.damageBonusZone,
+                "defense_zone" to result.breakdown.defenseZone,
+                "resistance_zone" to result.breakdown.resistanceZone,
+                "crit_zone" to result.breakdown.critZone,
+                "expected_damage" to result.expectedDamage,
+                "crit_damage" to result.critDamage
+            )
         }
+        
+        // 计算普攻连携循环伤害（E+Q+E 标准轮）
+        val basicSkill = skills.firstOrNull { it.type == SkillType.BASIC }
+        val skillSkill = skills.firstOrNull { it.type == SkillType.SKILL }
+        val ultSkill = skills.firstOrNull { it.type == SkillType.ULTIMATE }
+        
+        val basicDmg = if (basicSkill != null)
+            damageCalculator.calculateExpectedDamage(attackerStats, defenderStats, basicSkill, context) else 0.0
+        val skillDmg = if (skillSkill != null)
+            damageCalculator.calculateExpectedDamage(attackerStats, defenderStats, skillSkill, context) else 0.0
+        val ultDmg = if (ultSkill != null)
+            damageCalculator.calculateExpectedDamage(attackerStats, defenderStats, ultSkill, context) else 0.0
+        
+        val cycleDmg = skillDmg + ultDmg + basicDmg  // E+Q+A 标准循环
+        val enemyHp = enemy?.stats?.hp ?: 40000.0
+        val cyclesToKill = if (cycleDmg > 0) kotlin.math.ceil(enemyHp / cycleDmg).toInt() else 99
         
         return mapOf(
             "character" to (char?.name ?: characterId),
             "target" to (enemy?.name ?: enemyName),
             "attacker_stats" to mapOf(
                 "attack" to attackerStats.attack,
-                "crit_rate" to attackerStats.critRate,
-                "crit_dmg" to attackerStats.critDmg,
+                "crit_rate" to "${"%.1f".format(attackerStats.critRate * 100)}%",
+                "crit_dmg" to "${"%.1f".format(attackerStats.critDmg * 100)}%",
                 "speed" to attackerStats.speed
             ),
             "defender_stats" to mapOf(
                 "defense" to defenderStats.defense,
-                "resistance" to defenderStats.resistance,
-                "toughness" to defenderStats.toughness
+                "resistance" to "${"%.0f".format(defenderStats.resistance * 100)}%",
+                "toughness" to defenderStats.toughness,
+                "estimated_hp" to enemyHp
             ),
             "damage_results" to results,
-            "summary" to "${char?.name ?: characterId} 对 ${enemy?.name ?: enemyName} 的各技能期望伤害: ${results.joinToString(" | ") { "${it["skill"]}: ${"%.0f".format(it["expected_damage"])}" }}"
+            "cycle_damage" to mapOf(
+                "basic_expected" to basicDmg,
+                "skill_expected" to skillDmg,
+                "ultimate_expected" to ultDmg,
+                "total_per_cycle" to cycleDmg,
+                "estimated_cycles_to_kill" to cyclesToKill
+            ),
+            "summary" to buildString {
+                appendLine("${char?.name ?: characterId} 对 ${enemy?.name ?: enemyName} 的技能伤害：")
+                for (r in results) {
+                    appendLine("${r["type"]}·${r["skill"]}: 期望 ${"%.0f".format(r["expected_damage"])} | 倍率区×${"%.2f".format(r["multiplier_zone"])} 增伤区×${"%.2f".format(r["bonus_zone"])} 防御区×${"%.2f".format(r["defense_zone"])} 抗性区×${"%.2f".format(r["resistance_zone"])}")
+                }
+                appendLine("标准循环(E+Q+A): 总伤 ${"%.0f".format(cycleDmg)}，约 ${cyclesToKill} 轮击杀")
+            }
         )
     }
     
@@ -536,12 +582,69 @@ class ToolExecutor(
             else -> listOf("躯干: 暴击率", "脚部: 速度", "位面球: 攻击%", "连结绳: 攻击%")
         }
         
-        // 光锥推荐：按命途筛选，五星优先
+        // 光锥推荐：按命途筛选，拉表计算期望伤害
         val allCones = ds.getAllLightCones()
         val pathCones = allCones.filter { it.path == path }
-            .sortedByDescending { it.rarity }
-        val recommendedCones = pathCones.take(5).map { lc ->
-            "${lc.name} ★${lc.rarity} — ${lc.skill.name}: ${lc.superimposeLevels.firstOrNull()?.description?.take(40) ?: ""}"
+        
+        // 构建基础战斗属性（角色基础值 + 标准遗器加成）
+        val baseAtk = char.baseStats.attack
+        val baseHp = char.baseStats.hp
+        val baseDef = char.baseStats.defense
+        val baseSpd = char.baseStats.speed
+        val baseCritRate = 0.05 + 0.32  // 基础5% + 躯干暴击率主词条32%
+        val baseCritDmg = 0.50 + 0.30   // 基础50% + 副词条补正
+        
+        // 标准敌人（混沌12层精英）
+        val standardEnemy = EnemyDefensiveStats(defense = 1100.0, resistance = 0.20, toughness = 200)
+        val standardSkill = Skill("basic", SkillType.BASIC, "普攻", "",
+            listOf(ScalingEntry(StatType.ATK, 1.0)))
+        val calcContext = DamageContext(critRoll = 0.3)
+        
+        // 对每个光锥计算期望伤害
+        val coneWithDamage = pathCones.map { lc ->
+            // 光锥精炼1效果
+            val lcEffect = lc.superimposeLevels.firstOrNull()?.effect
+            var lcAttack = baseAtk + lc.baseStats.attack  // 加光锥白值
+            var lcCritRate = baseCritRate
+            var lcCritDmg = baseCritDmg
+            var lcDmgBonus = 0.0
+            var lcDefPen = 0.0
+            var lcResPen = 0.0
+            
+            if (lcEffect != null) {
+                when (lcEffect.type) {
+                    EffectType.ATK_UP -> lcAttack = baseAtk * (1 + lcEffect.value) + lc.baseStats.attack
+                    EffectType.CRIT_RATE_UP -> lcCritRate = baseCritRate + lcEffect.value
+                    EffectType.CRIT_DMG_UP -> lcCritDmg = baseCritDmg + lcEffect.value
+                    EffectType.DMG_UP -> lcDmgBonus = lcEffect.value
+                    EffectType.ELEMENTAL_DMG_UP -> lcDmgBonus = lcEffect.value
+                    EffectType.DEF_PENETRATION -> lcDefPen = lcEffect.value
+                    EffectType.RES_PENETRATION -> lcResPen = lcEffect.value
+                    else -> { /* 不直接影响伤害的效果忽略 */ }
+                }
+            }
+            
+            // 装备加成估算
+            val lcStats = CombatStats(
+                level = 80,
+                attack = lcAttack * 2.2,  // 遗器攻击%加成
+                defense = baseDef * 1.5,
+                maxHp = baseHp * 2.5,
+                speed = baseSpd + 20,
+                critRate = lcCritRate,
+                critDmg = lcCritDmg,
+                dmgBonus = lcDmgBonus,
+                elementalDmgBonus = 0.389,  // 位面球主词条
+                defPenetration = lcDefPen,
+                resPenetration = lcResPen
+            )
+            
+            val dmg = damageCalculator.calculateExpectedDamage(lcStats, standardEnemy, standardSkill, calcContext)
+            lc to dmg
+        }.sortedByDescending { it.second }
+        
+        val recommendedCones = coneWithDamage.take(5).map { (lc, dmg) ->
+            "${lc.name} ★${lc.rarity} — 期望伤害 ${"%.0f".format(dmg)} | ${lc.superimposeLevels.firstOrNull()?.description?.take(40) ?: ""}"
         }
         
         return mapOf(
@@ -588,69 +691,337 @@ class ToolExecutor(
         val characterId = parameters["character_id"] as? String ?: ""
         val fromEidolon = safeInt(parameters, "from_eidolon", 0)
         val toEidolon = safeInt(parameters, "to_eidolon", 6)
-        val benefits = eidolonAnalyzer.calculateBenefit(characterId, fromEidolon, toEidolon)
-        val summary = eidolonAnalyzer.getFullEidolonSummary(characterId)
+        val ds = dataSource
+        val char = ds?.searchCharacters(characterId)?.firstOrNull()
+        if (char == null) return mapOf("error" to "未找到角色: $characterId")
+        
+        // 构建基础战斗属性（0魂基准）
+        val baseAtk = char.baseStats.attack
+        val baseHp = char.baseStats.hp
+        val baseDef = char.baseStats.defense
+        val baseSpd = char.baseStats.speed
+        val baseCr = char.baseStats.critRate + 0.60  // 遗器补正
+        val baseCd = char.baseStats.critDmg + 1.0
+        
+        // 标准敌人 + 普攻技能
+        val enemy = EnemyDefensiveStats(defense = 1100.0, resistance = 0.20, toughness = 200)
+        val skill = Skill("basic", SkillType.BASIC, "普攻", "",
+            listOf(ScalingEntry(StatType.ATK, 1.0)))
+        val ctx = DamageContext(critRoll = 0.3)
+        
+        // 计算每个星魂等级的累计伤害
+        val rankDamages = mutableListOf<Pair<Int, Double>>()
+        for (rank in 0..toEidolon) {
+            // 应用该星魂及之前所有星魂的效果
+            var atkMult = 1.0
+            var crAdd = 0.0
+            var cdAdd = 0.0
+            var dmgAdd = 0.0
+            
+            val appliedEidolons = char.eidolons.filter { it.rank <= rank }
+            for (e in appliedEidolons) {
+                for (effect in e.effects) {
+                    when (effect.type) {
+                        EffectType.ATK_UP -> atkMult += effect.value
+                        EffectType.CRIT_RATE_UP -> crAdd += effect.value
+                        EffectType.CRIT_DMG_UP -> cdAdd += effect.value
+                        EffectType.DMG_UP -> dmgAdd += effect.value
+                        else -> { }
+                    }
+                }
+            }
+            
+            val stats = CombatStats(
+                level = 80,
+                attack = (baseAtk * 3.5) * (1 + atkMult),
+                defense = baseDef * 1.5,
+                maxHp = baseHp * 3.0,
+                speed = baseSpd + 20,
+                critRate = (baseCr + crAdd).coerceAtMost(1.0),
+                critDmg = baseCd + cdAdd,
+                dmgBonus = dmgAdd,
+                elementalDmgBonus = 0.389
+            )
+            
+            val dmg = damageCalculator.calculateExpectedDamage(stats, enemy, skill, ctx)
+            rankDamages.add(rank to dmg)
+        }
+        
+        // 生成星魂收益列表
+        val benefits = mutableListOf<Map<String, Any>>()
+        for (rank in (fromEidolon + 1)..toEidolon) {
+            val baseDmg = rankDamages.firstOrNull { it.first == fromEidolon }?.second ?: rankDamages.first().second
+            val currentDmg = rankDamages.firstOrNull { it.first == rank }?.second ?: 0.0
+            val increasePct = if (baseDmg > 0) ((currentDmg / baseDmg) - 1.0) * 100 else 0.0
+            
+            val eidolon = char.eidolons.getOrNull(rank - 1)
+            val rating = when {
+                increasePct >= 25 -> "质变 ★"
+                increasePct >= 15 -> "推荐"
+                increasePct >= 8 -> "不错"
+                else -> "一般"
+            }
+            
+            benefits.add(mapOf(
+                "rank" to rank,
+                "name" to (eidolon?.name ?: "星魂$rank"),
+                "description" to (eidolon?.description ?: ""),
+                "base_expected_damage" to baseDmg,
+                "new_expected_damage" to currentDmg,
+                "damage_increase_pct" to increasePct,
+                "rating" to rating
+            ))
+        }
+        
+        // 计算E6总提升
+        val e0Dmg = rankDamages.firstOrNull { it.first == 0 }?.second ?: 1.0
+        val e6Dmg = rankDamages.firstOrNull { it.first == 6 }?.second ?: 1.0
+        val totalIncrease = if (e0Dmg > 0) ((e6Dmg / e0Dmg) - 1.0) * 100 else 0.0
+        
+        // 找最大收益星魂
+        val bestRank = benefits.maxByOrNull { it["damage_increase_pct"] as? Double ?: 0.0 }
         
         return mapOf(
-            "character_id" to characterId,
+            "character" to char.name,
             "from_eidolon" to fromEidolon,
             "to_eidolon" to toEidolon,
-            "benefits" to benefits.map { 
-                mapOf(
-                    "rank" to it.rank,
-                    "rating" to it.overallRating.displayName,
-                    "damage_increase" to it.damageIncrease
-                )
-            },
-            "total_benefit" to summary.totalBenefitE6,
-            "key_eidolons" to summary.keyEidolons,
-            "recommended_target" to summary.recommendedTarget
+            "e0_expected_damage" to e0Dmg,
+            "e6_expected_damage" to e6Dmg,
+            "total_e6_increase_pct" to totalIncrease,
+            "best_rank" to (bestRank?.get("rank") ?: 0),
+            "benefits" to benefits,
+            "summary" to buildString {
+                appendLine("${char.name} 星魂收益分析（基于拉表计算）：")
+                appendLine("E0基准伤害: ${"%.0f".format(e0Dmg)}")
+                for (b in benefits) {
+                    appendLine("E${b["rank"]} ${b["name"]}: +${"%.1f".format(b["damage_increase_pct"])}% [${b["rating"]}]")
+                }
+                appendLine("E0→E6总提升: ${"%.1f".format(totalIncrease)}%")
+                if (bestRank != null) {
+                    appendLine("推荐优先解锁: E${bestRank["rank"]}（+${"%.1f".format(bestRank["damage_increase_pct"])}%）")
+                }
+            }
         )
     }
-    
-    private fun executeAnalyzeLightCone(parameters: Map<String, Any?>): Map<String, Any> {
+private fun executeAnalyzeLightCone(parameters: Map<String, Any?>): Map<String, Any> {
         val lightConeId = parameters["light_cone_id"] as? String ?: ""
         val fromLevel = safeInt(parameters, "from_level", 1)
         val toLevel = safeInt(parameters, "to_level", 5)
+        val ds = dataSource
         
-        val benefits = lightConeAnalyzer.calculateSuperimposeBenefit(lightConeId, fromLevel, toLevel)
+        val allCones = ds?.getAllLightCones() ?: return mapOf("error" to "数据源不可用")
+        val lc = allCones.firstOrNull { it.id == lightConeId || it.name.contains(lightConeId, ignoreCase = true) }
+        if (lc == null) return mapOf("error" to "未找到光锥: $lightConeId")
+        
+        // 标准角色模板 + 标准敌人
+        val standardEnemy = EnemyDefensiveStats(defense = 1100.0, resistance = 0.20, toughness = 200)
+        val skill = Skill("basic", SkillType.BASIC, "普攻", "",
+            listOf(ScalingEntry(StatType.ATK, 1.0)))
+        val ctx = DamageContext(critRoll = 0.3)
+        
+        // 计算每个精炼等级的期望伤害
+        val levelDamages = mutableListOf<Pair<Int, Double>>()
+        for (level in fromLevel..toLevel) {
+            val si = lc.superimposeLevels.getOrNull(level - 1)
+            var atkTotal = 700.0 * 3.5 + lc.baseStats.attack  // 基础ATK×遗器倍数 + 光锥白值
+            var cr = 0.05 + 0.60
+            var cd = 0.50 + 1.0
+            var dmgBonus = 0.0
+            var defPen = 0.0
+            var resPen = 0.0
+            
+            if (si != null) {
+                when (si.effect.type) {
+                    EffectType.ATK_UP -> atkTotal = (700.0 * 3.5) * (1 + si.effect.value) + lc.baseStats.attack
+                    EffectType.CRIT_RATE_UP -> cr = (0.05 + 0.60) + si.effect.value
+                    EffectType.CRIT_DMG_UP -> cd = (0.50 + 1.0) + si.effect.value
+                    EffectType.DMG_UP -> dmgBonus = si.effect.value
+                    EffectType.ELEMENTAL_DMG_UP -> dmgBonus = si.effect.value
+                    EffectType.DEF_PENETRATION -> defPen = si.effect.value
+                    EffectType.RES_PENETRATION -> resPen = si.effect.value
+                    else -> { }
+                }
+            }
+            
+            val stats = CombatStats(
+                level = 80,
+                attack = atkTotal,
+                defense = 400.0 * 1.5,
+                maxHp = 900.0 * 3.0,
+                speed = 100.0 + 20,
+                critRate = cr.coerceAtMost(1.0),
+                critDmg = cd,
+                dmgBonus = dmgBonus,
+                elementalDmgBonus = 0.389,
+                defPenetration = defPen,
+                resPenetration = resPen
+            )
+            
+            val dmg = damageCalculator.calculateExpectedDamage(stats, standardEnemy, skill, ctx)
+            levelDamages.add(level to dmg)
+        }
+        
+        // 生成精炼收益列表
+        val benefits = mutableListOf<Map<String, Any>>()
+        for (level in (fromLevel + 1)..toLevel) {
+            val baseDmg = levelDamages.firstOrNull { it.first == fromLevel }?.second ?: levelDamages.first().second
+            val currentDmg = levelDamages.firstOrNull { it.first == level }?.second ?: 0.0
+            val increasePct = if (baseDmg > 0) ((currentDmg / baseDmg) - 1.0) * 100 else 0.0
+            
+            val si = lc.superimposeLevels.getOrNull(level - 1)
+            benefits.add(mapOf(
+                "level" to level,
+                "description" to (si?.description ?: "精炼$level"),
+                "expected_damage" to currentDmg,
+                "increase_from_base_pct" to increasePct,
+                "rating" to when {
+                    increasePct >= 12 -> "推荐"
+                    increasePct >= 6 -> "不错"
+                    else -> "一般"
+                }
+            ))
+        }
+        
+        val baseDmg = levelDamages.first().second
+        val maxDmg = levelDamages.last().second
+        val totalIncrease = if (baseDmg > 0) ((maxDmg / baseDmg) - 1.0) * 100 else 0.0
         
         return mapOf(
-            "light_cone_id" to lightConeId,
+            "light_cone" to lc.name,
+            "rarity" to lc.rarity,
+            "path" to lc.path.displayName,
             "from_level" to fromLevel,
             "to_level" to toLevel,
-            "benefits" to benefits.map {
-                mapOf(
-                    "level" to it.level,
-                    "rating" to it.overallRating.displayName,
-                    "damage_increase" to it.damageIncrease
-                )
-            },
-            "total_benefit" to benefits.sumOf { it.damageIncrease ?: 0.0 }
+            "base_expected_damage" to baseDmg,
+            "max_expected_damage" to maxDmg,
+            "total_increase_pct" to totalIncrease,
+            "benefits" to benefits,
+            "summary" to buildString {
+                appendLine("${lc.name} 精炼收益分析（基于拉表计算）：")
+                appendLine("精$fromLevel 基准伤害: ${"%.0f".format(baseDmg)}")
+                for (b in benefits) {
+                    appendLine("精${b["level"]}: +${"%.1f".format(b["increase_from_base_pct"])}% [${b["rating"]}]")
+                }
+                appendLine("精$fromLevel→精$toLevel 总提升: ${"%.1f".format(totalIncrease)}%")
+            }
         )
     }
     
     private fun executeCompareUpgradePath(parameters: Map<String, Any?>): Map<String, Any> {
         val characterId = parameters["character_id"] as? String ?: ""
+        val ds = dataSource
+        val char = ds?.searchCharacters(characterId)?.firstOrNull()
+        if (char == null) return mapOf("error" to "未找到角色: $characterId")
         
-        // 简化的路径对比
+        // 标准敌人 + 普攻技能
+        val enemy = EnemyDefensiveStats(defense = 1100.0, resistance = 0.20, toughness = 200)
+        val skill = Skill("basic", SkillType.BASIC, "普攻", "",
+            listOf(ScalingEntry(StatType.ATK, 1.0)))
+        val ctx = DamageContext(critRoll = 0.3)
+        
+        val baseAtk = char.baseStats.attack
+        val baseCr = char.baseStats.critRate + 0.60
+        val baseCd = char.baseStats.critDmg + 1.0
+        
+        // E0 基准伤害
+        fun makeStats(atkMul: Double, crAdd: Double, cdAdd: Double, dmgAdd: Double): CombatStats {
+            return CombatStats(
+                level = 80,
+                attack = baseAtk * 3.5 * (1 + atkMul),
+                defense = char.baseStats.defense * 1.5,
+                maxHp = char.baseStats.hp * 3.0,
+                speed = char.baseStats.speed + 20,
+                critRate = (baseCr + crAdd).coerceAtMost(1.0),
+                critDmg = baseCd + cdAdd,
+                dmgBonus = dmgAdd,
+                elementalDmgBonus = 0.389
+            )
+        }
+        
+        val e0Dmg = damageCalculator.calculateExpectedDamage(makeStats(0.0, 0.0, 0.0, 0.0), enemy, skill, ctx)
+        
+        // 方案A: 星魂提升至E2（取E1+E2效果累计）
+        var eAtkMul = 0.0; var eCrAdd = 0.0; var eCdAdd = 0.0; var eDmgAdd = 0.0
+        for (e in char.eidolons.filter { it.rank <= 2 }) {
+            for (eff in e.effects) {
+                when (eff.type) {
+                    EffectType.ATK_UP -> eAtkMul += eff.value
+                    EffectType.CRIT_RATE_UP -> eCrAdd += eff.value
+                    EffectType.CRIT_DMG_UP -> eCdAdd += eff.value
+                    EffectType.DMG_UP -> eDmgAdd += eff.value
+                    else -> { }
+                }
+            }
+        }
+        val e2Dmg = damageCalculator.calculateExpectedDamage(makeStats(eAtkMul, eCrAdd, eCdAdd, eDmgAdd), enemy, skill, ctx)
+        val e2Gain = if (e0Dmg > 0) ((e2Dmg / e0Dmg) - 1.0) * 100 else 0.0
+        
+        // 方案B: 星魂提升至E6
+        var e6AtkMul = 0.0; var e6CrAdd = 0.0; var e6CdAdd = 0.0; var e6DmgAdd = 0.0
+        for (e in char.eidolons) {
+            for (eff in e.effects) {
+                when (eff.type) {
+                    EffectType.ATK_UP -> e6AtkMul += eff.value
+                    EffectType.CRIT_RATE_UP -> e6CrAdd += eff.value
+                    EffectType.CRIT_DMG_UP -> e6CdAdd += eff.value
+                    EffectType.DMG_UP -> e6DmgAdd += eff.value
+                    else -> { }
+                }
+            }
+        }
+        val e6Dmg = damageCalculator.calculateExpectedDamage(makeStats(e6AtkMul, e6CrAdd, e6CdAdd, e6DmgAdd), enemy, skill, ctx)
+        val e6Gain = if (e0Dmg > 0) ((e6Dmg / e0Dmg) - 1.0) * 100 else 0.0
+        
+        // 方案C: 精炼从1→5（找适配光锥）
+        val pathCones = ds?.getAllLightCones()?.filter { it.path == char.path } ?: emptyList()
+        val bestCone = pathCones.maxByOrNull {
+            damageCalculator.calculateExpectedDamage(makeStats(0.0, 0.0, 0.0, 0.0), enemy, skill, ctx)
+        }
+        var s1Gain = 0.0
+        var s5Gain = 0.0
+        if (bestCone != null) {
+            val s1 = bestCone.superimposeLevels.firstOrNull()
+            val s5 = bestCone.superimposeLevels.lastOrNull()
+            
+            fun coneStats(level: Int): CombatStats {
+                val si = bestCone.superimposeLevels.getOrNull(level - 1)
+                var atk = baseAtk * 3.5 + bestCone.baseStats.attack
+                var cr = baseCr; var cd = baseCd; var dmg = 0.0; var defPen = 0.0; var resPen = 0.0
+                if (si != null) {
+                    when (si.effect.type) {
+                        EffectType.ATK_UP -> atk = (baseAtk * 3.5) * (1 + si.effect.value) + bestCone.baseStats.attack
+                        EffectType.CRIT_RATE_UP -> cr = baseCr + si.effect.value
+                        EffectType.CRIT_DMG_UP -> cd = baseCd + si.effect.value
+                        EffectType.DMG_UP -> dmg = si.effect.value
+                        EffectType.ELEMENTAL_DMG_UP -> dmg = si.effect.value
+                        EffectType.DEF_PENETRATION -> defPen = si.effect.value
+                        EffectType.RES_PENETRATION -> resPen = si.effect.value
+                        else -> { }
+                    }
+                }
+                return CombatStats(80, atk, char.baseStats.defense * 1.5, char.baseStats.hp * 3.0,
+                    char.baseStats.speed + 20, cr.coerceAtMost(1.0), cd, dmg, 0.389, defPen, resPen)
+            }
+            
+            val s1Dmg = damageCalculator.calculateExpectedDamage(coneStats(1), enemy, skill, ctx)
+            val s5Dmg = damageCalculator.calculateExpectedDamage(coneStats(5), enemy, skill, ctx)
+            s1Gain = if (s1Dmg > e0Dmg) ((s1Dmg / e0Dmg) - 1.0) * 100 else 0.0
+            s5Gain = if (s5Dmg > s1Dmg) ((s5Dmg / s1Dmg) - 1.0) * 100 else 0.0
+        }
+        
+        // 排序推荐
+        val options = listOf(
+            mapOf("path" to "星魂 E0→E2", "damage_increase_pct" to e2Gain, "cost_estimate" to "中等"),
+            mapOf("path" to "星魂 E0→E6", "damage_increase_pct" to e6Gain, "cost_estimate" to "高"),
+            mapOf("path" to "光锥精炼 1→5", "damage_increase_pct" to s5Gain, "cost_estimate" to "高"),
+            mapOf("path" to "光锥获取(精1)", "damage_increase_pct" to s1Gain, "cost_estimate" to "低~中")
+        ).sortedByDescending { it["damage_increase_pct"] as? Double ?: 0.0 }
+        
         return mapOf(
-            "character_id" to characterId,
-            "option_1" to mapOf(
-                "type" to "星魂",
-                "target" to 2,
-                "benefit" to 25.0,
-                "cost" to 100,
-                "efficiency" to "A"
-            ),
-            "option_2" to mapOf(
-                "type" to "精炼",
-                "target" to 3,
-                "benefit" to 20.0,
-                "cost" to 240,
-                "efficiency" to "B"
-            ),
-            "recommendation" to "星魂提升性价比更高，建议优先补星魂"
+            "character" to char.name,
+            "e0_baseline_damage" to e0Dmg,
+            "options" to options,
+            "recommendation" to "按伤害提升排序：${options.joinToString(" > ") { it["path"] as? String ?: "" }}"
         )
     }
     

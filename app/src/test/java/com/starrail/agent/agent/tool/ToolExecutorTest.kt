@@ -186,4 +186,97 @@ class ToolExecutorTest {
         assertNotNull(data)
         assertNotNull(data!!["error"])
     }
+
+    // ==================== 拉表计算工具测试 ====================
+
+    @Test
+    fun testGetRecommendedBuild_lightCones() {
+        val result = executor.execute("get_recommended_build", mapOf("character_name" to "希儿"))
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        assertNotNull(data!!["recommended_light_cones"])
+        val cones = data["recommended_light_cones"] as? List<*>
+        assertNotNull(cones)
+        assertTrue("应有光锥推荐", cones!!.isNotEmpty())
+        assertTrue("应包含伤害数字", cones.any { it.toString().contains("期望") })
+    }
+
+    @Test
+    fun testCalculateDamage_fullBreakdown() {
+        val result = executor.execute("calculate_damage", mapOf("character_id" to "希儿", "target_enemy" to "可可利亚"))
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        val results = data!!["damage_results"] as? List<*>
+        assertNotNull(results)
+        assertTrue("应有≥3个技能", results!!.size >= 3)
+        val cycle = data["cycle_damage"] as? Map<*, *>
+        assertNotNull(cycle)
+        assertTrue((cycle!!["estimated_cycles_to_kill"] as? Int) ?: 0 > 0)
+        val first = results!![0] as? Map<*, *>
+        assertNotNull(first)
+        assertNotNull(first!!["multiplier_zone"])
+        assertNotNull(first["defense_zone"])
+    }
+
+    @Test
+    fun testSimulateBattle_calculated() {
+        val result = executor.execute("simulate_battle", mapOf("character_id" to "希儿", "target_enemy" to "可可利亚"))
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        assertTrue((data!!["estimated_cycles"] as? Int) ?: 0 > 0)
+        assertTrue((data["estimated_basic_damage"] as? Double) ?: 0.0 > 0)
+    }
+
+    @Test
+    fun testAnalyzeEidolon_calculated() {
+        val result = executor.execute("analyze_eidolon", mapOf("character_id" to "希儿"))
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        assertTrue((data!!["e0_expected_damage"] as? Double) ?: 0.0 > 0)
+        assertTrue(data!!["total_e6_increase_pct"] as? Double ?: 0.0 >= 0)
+        val benefits = data["benefits"] as? List<*>
+        assertNotNull(benefits)
+        assertTrue(benefits!!.isNotEmpty())
+        val first = benefits!![0] as? Map<*, *>
+        assertNotNull(first)
+        assertNotNull(first!!["damage_increase_pct"])
+    }
+
+    @Test
+    fun testAnalyzeEidolon_specificRange() {
+        val result = executor.execute("analyze_eidolon", mapOf("character_id" to "希儿", "from_eidolon" to 0, "to_eidolon" to 2))
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        assertEquals(2, (data!!["benefits"] as? List<*>)?.size)
+    }
+
+    @Test
+    fun testAnalyzeLightCone_calculated() {
+        val result = executor.execute("analyze_lightcone", mapOf("light_cone_id" to "于夜色中"))
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        assertTrue((data!!["base_expected_damage"] as? Double) ?: 0.0 > 0)
+        assertTrue((data!!["total_increase_pct"] as? Double) ?: 0.0 >= 0)
+        val benefits = data["benefits"] as? List<*>
+        assertNotNull(benefits)
+        assertTrue(benefits!!.isNotEmpty())
+        val first = benefits!![0] as? Map<*, *>
+        assertNotNull(first)
+        assertNotNull(first!!["increase_from_base_pct"])
+    }
+
+    @Test
+    fun testAnalyzeLightCone_specificRange() {
+        val result = executor.execute("analyze_lightcone", mapOf("light_cone_id" to "拂晓之前", "from_level" to 1, "to_level" to 3))
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        assertEquals(2, (data!!["benefits"] as? List<*>)?.size)
+    }
 }

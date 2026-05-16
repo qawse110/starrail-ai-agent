@@ -214,10 +214,10 @@ class StarRailAgent(
             ))
         }
 
-        // 将工具结果发给 LLM 生成最终回复
+        // 将工具结果发给 LLM 生成最终回复（仍然携带工具定义，支持多轮调用）
         val finalMessages = listOf(history.first()) + history.drop(1).takeLast(MAX_MESSAGES_PER_CONVERSATION)
         val finalResponse = withContext(Dispatchers.IO) {
-            llmService?.chat(finalMessages, emptyList()) ?: throw IllegalStateException("LLM 不可用")
+            llmService?.chat(finalMessages, getToolDefinitions()) ?: throw IllegalStateException("LLM 不可用")
         }
 
         val reply = if (finalResponse.success) {
@@ -231,6 +231,7 @@ class StarRailAgent(
 
     /** 解析 JSON 参数 */
     private fun parseJsonArgs(json: String): Map<String, Any?> {
+        if (json.isBlank()) return emptyMap()
         return try {
             val obj = org.json.JSONObject(json)
             val map = mutableMapOf<String, Any?>()

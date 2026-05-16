@@ -120,36 +120,44 @@ class ReportGenerator {
         entities: ParsedEntities
     ): AnalysisReport {
         val data = toolResults.firstOrNull()?.data as? Map<String, Any> ?: emptyMap()
-        val characterId = entities.primaryCharacter ?: "角色"
-        val estimatedDamage = data["estimated_damage"] as? Double ?: 0.0
-        val cycles = data["cycles"] as? Int ?: 0
-        val summary = data["summary"] as? String ?: "${characterId}预计需要${cycles}轮"
+        val character = data["character"] as? String ?: entities.primaryCharacter ?: "角色"
+        val target = data["target"] as? String ?: entities.primaryEnemy ?: "敌人"
+        val basicDmg = data["estimated_basic_damage"] as? Double ?: 0.0
+        val ultDmg = data["estimated_ult_damage"] as? Double ?: 0.0
+        val cycles = data["estimated_cycles"] as? Int ?: 0
+        val baseAtk = data["character_base_atk"] as? Double ?: 0.0
+        val enemyHp = data["enemy_hp"] as? Double ?: 0.0
+        val toughness = data["enemy_toughness"] as? Int ?: 0
+        val summary = data["summary"] as? String ?: "${character}对${target}模拟完成"
         
         return AnalysisReport(
             title = "⚔️ 战斗模拟报告",
             summary = summary,
             sections = listOf(
                 ReportSection(
-                    title = "伤害估算",
-                    content = "预计总伤害: ${formatNumber(estimatedDamage)}\n" +
-                             "预计回合数: $cycles 轮",
+                    title = "伤害计算",
+                    content = "角色: $character (基础ATK: ${formatNumber(baseAtk)})\n" +
+                             "目标: $target\n" +
+                             "普攻期望伤害: ${formatNumber(basicDmg)}\n" +
+                             "终结技期望伤害: ${formatNumber(ultDmg)}\n" +
+                             "敌人HP: ${formatNumber(enemyHp)} | 韧性: $toughness",
                     type = SectionType.TEXT,
                     importance = 5
                 ),
                 ReportSection(
-                    title = "战技点使用",
-                    content = "预计使用战技点: ${data["sp_used"] as? Int ?: 0} 点",
+                    title = "击杀估算",
+                    content = "预计 $cycles 轮击杀",
                     type = SectionType.TEXT,
-                    importance = 3
+                    importance = 4
                 )
             ),
             keyFindings = listOf(
-                "${characterId}的总伤害表现",
-                "完成战斗预计需要 $cycles 轮"
+                "$character 对 $target 普攻期望 $basicDmg",
+                "终结技期望 $ultDmg",
+                "预计 $cycles 轮击杀"
             ),
             recommendations = listOf(
-                "建议保持当前配置",
-                "如有需要可调整遗器配装"
+                if (cycles <= 3) "伤害充足，配置合格" else "伤害不足，建议提升练度"
             )
         )
     }
@@ -264,53 +272,45 @@ class ReportGenerator {
         entities: ParsedEntities
     ): AnalysisReport {
         val data = toolResults.firstOrNull()?.data as? Map<String, Any> ?: emptyMap()
-        val characterId = entities.primaryCharacter ?: "角色"
-        val totalBenefit = data["total_benefit"] as? Double ?: 0.0
-        val recommendedTarget = data["recommended_target"] as? Int ?: 0
+        val character = data["character"] as? String ?: entities.primaryCharacter ?: "角色"
+        val totalIncrease = data["total_e6_increase_pct"] as? Double ?: 0.0
+        val e0Dmg = data["e0_expected_damage"] as? Double ?: 0.0
+        val e6Dmg = data["e6_expected_damage"] as? Double ?: 0.0
+        val bestRank = data["best_rank"] as? Int ?: 0
         
         @Suppress("UNCHECKED_CAST")
         val benefits = data["benefits"] as? List<Map<String, Any>> ?: emptyList()
         
-        @Suppress("UNCHECKED_CAST")
-        val keyEidolons = data["key_eidolons"] as? List<Int> ?: emptyList()
-        
-        val summary = "${characterId}满星魂总提升约 ${totalBenefit.toInt()}%"
+        val summary = "${character}E0→E6 总提升 ${"%.1f".format(totalIncrease)}% (E0: ${"%.0f".format(e0Dmg)} → E6: ${"%.0f".format(e6Dmg)})"
         
         return AnalysisReport(
             title = "⬆️ 星魂提升分析报告",
             summary = summary,
             sections = listOf(
                 ReportSection(
-                    title = "逐级收益",
+                    title = "逐级收益（基于拉表计算）",
                     content = benefits.joinToString("\n") {
                         val rank = it["rank"] as? Int ?: 0
                         val rating = it["rating"] as? String ?: ""
-                        val increase = it["damage_increase"] as? Double ?: 0.0
-                        "星魂 $rank: ${increase.toInt()}% (${rating})"
+                        val increase = it["damage_increase_pct"] as? Double ?: 0.0
+                        "E${rank}: +${"%.1f".format(increase)}% [${rating}]"
                     },
                     type = SectionType.TABLE,
                     importance = 5
                 ),
                 ReportSection(
-                    title = "关键星魂",
-                    content = "质变星魂: ${keyEidolons.joinToString("、")}",
-                    type = SectionType.TEXT,
-                    importance = 5
-                ),
-                ReportSection(
-                    title = "推荐目标",
-                    content = "建议优先提升至 ${recommendedTarget} 魂",
+                    title = "伤害对比",
+                    content = "E0基准: ${"%.0f".format(e0Dmg)}\nE6峰值: ${"%.0f".format(e6Dmg)}\n总提升: ${"%.1f".format(totalIncrease)}%",
                     type = SectionType.TEXT,
                     importance = 4
                 )
             ),
             keyFindings = listOf(
-                "满星魂总提升 ${totalBenefit.toInt()}%",
-                "关键质变星魂为 ${keyEidolons.take(2).joinToString("、")} 魂"
+                "E0→E6总提升 ${"%.1f".format(totalIncrease)}%",
+                "推荐优先解锁 E${bestRank}"
             ),
             recommendations = listOf(
-                "优先解锁关键质变星魂 (${keyEidolons.joinToString("、")})",
-                "根据资源情况决定是否继续提升"
+                "优先解锁E${bestRank}，性价比最高"
             )
         )
     }
@@ -321,48 +321,35 @@ class ReportGenerator {
         entities: ParsedEntities
     ): AnalysisReport {
         val data = toolResults.firstOrNull()?.data as? Map<String, Any> ?: emptyMap()
-        val characterId = entities.primaryCharacter ?: "角色"
-        val recommendation = data["recommendation"] as? String ?: "根据性价比选择"
+        val character = data["character"] as? String ?: entities.primaryCharacter ?: "角色"
+        val e0Dmg = data["e0_baseline_damage"] as? Double ?: 0.0
+        val recommendation = data["recommendation"] as? String ?: "根据数据选择"
         
         @Suppress("UNCHECKED_CAST")
-        val option1 = data["option_1"] as? Map<String, Any> ?: emptyMap()
-        @Suppress("UNCHECKED_CAST")
-        val option2 = data["option_2"] as? Map<String, Any> ?: emptyMap()
+        val options = data["options"] as? List<Map<String, Any>> ?: emptyList()
         
         return AnalysisReport(
             title = "⚖️ 升级路径对比报告",
-            summary = recommendation,
+            summary = "${character} 升级路径对比 (E0基准: ${"%.0f".format(e0Dmg)})",
             sections = listOf(
                 ReportSection(
-                    title = "方案一：星魂提升",
-                    content = buildString {
-                        appendLine("目标: ${option1["target"]}魂")
-                        appendLine("预计提升: ${option1["benefit"]}%")
-                        appendLine("消耗: ${option1["cost"]}星辉")
-                        appendLine("性价比: ${option1["efficiency"]}级")
-                    },
-                    type = SectionType.TEXT,
-                    importance = 5
-                ),
-                ReportSection(
-                    title = "方案二：光锥精炼",
-                    content = buildString {
-                        appendLine("目标: 精${option2["target"]}")
-                        appendLine("预计提升: ${option2["benefit"]}%")
-                        appendLine("消耗: ${option2["cost"]}星琼")
-                        appendLine("性价比: ${option2["efficiency"]}级")
-                    },
-                    type = SectionType.TEXT,
+                    title = "方案对比（基于拉表计算）",
+                    content = options.mapIndexed { i, opt ->
+                        val path = opt["path"] as? String ?: "方案${i+1}"
+                        val pct = opt["damage_increase_pct"] as? Double ?: 0.0
+                        val cost = opt["cost_estimate"] as? String ?: "?"
+                        "${i+1}. $path: +${"%.1f".format(pct)}% [${cost}成本]"
+                    }.joinToString("\n"),
+                    type = SectionType.TABLE,
                     importance = 5
                 )
             ),
             keyFindings = listOf(
-                "星魂和光锥精炼各有优劣",
-                "需要根据资源储备情况决定"
+                "推荐: ${recommendation}"
             ),
             recommendations = listOf(
                 recommendation,
-                "优先选择性价比更高的方案"
+                "优先选择伤害提升最大的方案"
             )
         )
     }
