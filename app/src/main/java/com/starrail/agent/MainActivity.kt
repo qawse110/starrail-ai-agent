@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -1072,34 +1073,74 @@ fun DataManagementCard() {
                 }
             }
             
-            // 同步按钮
-            OutlinedButton(
-                onClick = {
-                    isSyncing = true
-                    syncProgress = "正在获取数据列表..."
-                    kotlinx.coroutines.MainScope().launch {
-                        val syncManager = WikiDataSyncManager(context.filesDir)
-                        val result = withContext(Dispatchers.IO) {
-                            syncManager.syncAll { progress ->
-                                syncProgress = "${progress.stage}: ${progress.current}/${progress.total} ${progress.message}"
+            // 同步按钮组
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        isSyncing = true
+                        syncProgress = "全量同步：正在获取数据列表..."
+                        kotlinx.coroutines.MainScope().launch {
+                            val syncManager = WikiDataSyncManager(context.filesDir)
+                            val result = withContext(Dispatchers.IO) {
+                                syncManager.syncAll { progress ->
+                                    syncProgress = "${progress.stage}: ${progress.current}/${progress.total} ${progress.message}"
+                                }
+                            }
+                            isSyncing = false
+                            syncProgress = null
+                            val modeLabel = "全量"
+                            val changedInfo = if (result.changedCount > 0) " (${result.changedCount}个变更)" else ""
+                            if (result.success && result.charactersCount > 0) {
+                                val size = if (wikiDataFile.exists()) "${wikiDataFile.length() / 1024}KB" else "?"
+                                statusMessage = "✅ ${modeLabel}同步完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥$changedInfo ($size)"
+                            } else if (result.success && result.changedCount == 0) {
+                                statusMessage = "✅ 数据已是最新，无需更新"
+                            } else {
+                                statusMessage = "⚠️ ${modeLabel}同步部分完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 (${result.errors.size}个错误)"
                             }
                         }
-                        isSyncing = false
-                        if (result.success) {
-                            val size = if (wikiDataFile.exists()) "${wikiDataFile.length() / 1024}KB" else "?"
-                            statusMessage = "✅ Wiki数据同步完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 ($size)"
-                        } else {
-                            statusMessage = "⚠️ 同步部分完成 (${result.errors.size}个错误)，${result.charactersCount}角色 + ${result.lightConesCount}光锥"
+                    },
+                    enabled = !isSyncing,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("全量同步", fontSize = 13.sp, maxLines = 1)
+                }
+                
+                OutlinedButton(
+                    onClick = {
+                        isSyncing = true
+                        syncProgress = "增量同步：检查页面变更..."
+                        kotlinx.coroutines.MainScope().launch {
+                            val syncManager = WikiDataSyncManager(context.filesDir)
+                            val result = withContext(Dispatchers.IO) {
+                                syncManager.syncIncremental { progress ->
+                                    syncProgress = "${progress.stage}: ${progress.current}/${progress.total} ${progress.message}"
+                                }
+                            }
+                            isSyncing = false
+                            syncProgress = null
+                            // 显示结果
+                            val modeLabel = if (result.mode == com.starrail.agent.core.sync.SyncMode.INCREMENTAL) "增量" else "全量"
+                            val changedInfo = if (result.changedCount > 0) " (${result.changedCount}个变更)" else ""
+                            if (result.success && result.charactersCount > 0) {
+                                val size = if (wikiDataFile.exists()) "${wikiDataFile.length() / 1024}KB" else "?"
+                                statusMessage = "✅ ${modeLabel}同步完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥$changedInfo ($size)"
+                            } else if (result.success && result.changedCount == 0) {
+                                statusMessage = "✅ 数据已是最新，无需更新"
+                            } else {
+                                statusMessage = "⚠️ ${modeLabel}同步部分完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 (${result.errors.size}个错误)"
+                            }
                         }
-                        syncProgress = null
-                    }
-                },
-                enabled = !isSyncing,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(if (isSyncing) "同步中..." else "🔄 Wiki数据同步")
+                    },
+                    enabled = !isSyncing,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("增量同步", fontSize = 13.sp, maxLines = 1)
+                }
             }
             
             Spacer(modifier = Modifier.height(8.dp))

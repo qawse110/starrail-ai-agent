@@ -7,6 +7,7 @@ import com.starrail.agent.team.*
 import com.starrail.agent.upgrade.*
 import com.starrail.agent.player.*
 import com.starrail.agent.core.model.*
+import com.starrail.agent.core.sync.WikiDataLoader
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 
@@ -62,7 +63,8 @@ class ToolExecutor(
     private val eidolonAnalyzer: EidolonAnalyzer = EidolonAnalyzer(),
     private val lightConeAnalyzer: LightConeAnalyzer = LightConeAnalyzer(),
     private val costBenefitAnalyzer: CostBenefitAnalyzer = CostBenefitAnalyzer(),
-    private val dataSource: com.starrail.agent.core.datasource.InMemoryGameDataSource? = null
+    private val dataSource: com.starrail.agent.core.datasource.InMemoryGameDataSource? = null,
+    private val wikiDataLoader: WikiDataLoader? = null
 ) {
     /** 所有可用工具 */
     private val tools: Map<String, ToolDefinition> = buildToolDefinitions()
@@ -96,6 +98,7 @@ class ToolExecutor(
                 "get_relic_set_info" -> executeGetRelicSetInfo(parameters)
                 "get_enemy_info" -> executeGetEnemyInfo(parameters)
                 "get_recommended_build" -> executeGetRecommendedBuild(parameters)
+                "search_wiki_data" -> executeSearchWikiData(parameters)
                 else -> throw IllegalArgumentException("Unknown tool: $toolName")
             }
             
@@ -1024,6 +1027,67 @@ private fun executeAnalyzeLightCone(parameters: Map<String, Any?>): Map<String, 
             "recommendation" to "按伤害提升排序：${options.joinToString(" > ") { it["path"] as? String ?: "" }}"
         )
     }
+
+    /** Wiki 数据查询工具 */
+    private fun executeSearchWikiData(parameters: Map<String, Any?>): Map<String, Any?> {
+        val loader = wikiDataLoader
+        if (loader == null || !loader.hasData()) {
+            return mapOf("error" to "未找到 Wiki 数据缓存，请先在设置页同步数据")
+        }
+
+        val query = (parameters["query"] as? String ?: "").trim()
+        val type = (parameters["type"] as? String ?: "auto").trim()
+        val path = (parameters["path"] as? String ?: "").trim()
+
+        val results = mutableListOf<Map<String, String>>()
+
+        when (type.lowercase()) {
+            "character", "角色" -> {
+                if (path.isNotBlank()) {
+                    results.addAll(loader.listCharactersByPath(path))
+                } else if (query.isNotBlank()) {
+                    results.addAll(loader.searchCharacter(query))
+                } else {
+                    results.addAll(loader.listAllCharacters().take(30))
+                }
+            }
+            "lightcone", "光锥" -> {
+                if (path.isNotBlank()) {
+                    results.addAll(loader.listLightConesByPath(path))
+                } else if (query.isNotBlank()) {
+                    results.addAll(loader.searchLightCone(query))
+                } else {
+                    results.addAll(loader.listAllLightCones().take(30))
+                }
+            }
+            else -> {
+                // auto: 先搜角色，再搜光锥
+                if (query.isNotBlank()) {
+                    results.addAll(loader.searchCharacter(query))
+                    if (results.isEmpty()) {
+                        results.addAll(loader.searchLightCone(query))
+                    }
+                } else {
+                    val stats = loader.getStats()
+                    return mapOf(
+                        "stats" to "Wiki 数据包含 ${stats["characters"]} 名角色、${stats["light_cones"]} 个光锥",
+                        "available_types" to listOf("character", "lightcone"),
+                        "usage" to "使用 type=character|lightcone 筛选，query=关键词 搜索，path=命途 筛选"
+                    )
+                }
+            }
+        }
+
+        val limited = results.take(20)
+        return mapOf(
+            "type" to type,
+            "query" to query,
+            "total" to results.size,
+            "returned" to limited.size,
+            "results" to limited,
+            "has_more" to (results.size > 20)
+        )
+    }
     
     /** 构建工具定义 */
     private fun buildToolDefinitions(): Map<String, ToolDefinition> {
@@ -1188,6 +1252,17 @@ private fun executeAnalyzeLightCone(parameters: Map<String, Any?>): Map<String, 
                 ),
                 module = "data",
                 requiredIntent = Intent.RECOMMEND_RELIC_SET
+            ),
+            "search_wiki_data" to ToolDefinition(
+                name = "search_wiki_data",
+                description = "搜索Wiki数据（角色/光锥的官方中文名、稀有度、命途、阵营等真实数据）",
+                parameters = listOf(
+                    ToolParameter("type", ParameterType.STRING, "数据类型: character(角色) | lightcone(光锥) | auto(自动)", false, "auto"),
+                    ToolParameter("query", ParameterType.STRING, "搜索关键词", false),
+                    ToolParameter("path", ParameterType.STRING, "按命途筛选", false)
+                ),
+                module = "data",
+                requiredIntent = Intent.QUERY_INFO
             )
         )
     }

@@ -11,6 +11,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * 从 bilibili Wiki MediaWiki API 获取真实游戏数据
  * 数据源: https://wiki.biligame.com/sr/api.php
  *
+ * 支持全量/增量两种模式：
+ * - FULL: 重新下载所有页面，替换本地缓存
+ * - INCREMENTAL: 只下载有变更的页面（基于 revision ID 检测）
+ *
  * 参考 AstralArchives 项目思路：
  * https://github.com/XCreeperPa/AstralArchives
  */
@@ -27,6 +31,7 @@ class WikiDataSyncManager(private val dataDir: File) {
 
     private val requestCounter = AtomicInteger(0)
     private val lastRequestTime = mutableListOf<Long>()
+    private var syncState = SyncState.load(dataDir)
 
     /** 同步状态回调 */
     class SyncProgress(
@@ -39,19 +44,33 @@ class WikiDataSyncManager(private val dataDir: File) {
     /** 同步结果 */
     data class SyncResult(
         val success: Boolean,
+        val mode: SyncMode = SyncMode.FULL,
         val charactersCount: Int = 0,
         val lightConesCount: Int = 0,
+        val changedCount: Int = 0,       // 增量模式下有变更的页面数
         val errors: List<String> = emptyList()
     )
 
-    /** 执行完整同步 */
+    /** 执行全量同步：重新下载所有页面 */
     fun syncAll(onProgress: (SyncProgress) -> Unit = {}): SyncResult {
+        return sync(SyncMode.FULL, onProgress)
+    }
+
+    /** 执行增量同步：只下载有变更的页面 */
+    fun syncIncremental(onProgress: (SyncProgress) -> Unit = {}): SyncResult {
+        return sync(SyncMode.INCREMENTAL, onProgress)
+    }
+
+    /** 核心同步方法 */
+    private fun sync(mode: SyncMode, onProgress: (SyncProgress) -> Unit): SyncResult {
         val errors = mutableListOf<String>()
         var charsCount = 0
         var conesCount = 0
+        var changedCount = 0
+        val isFull = mode == SyncMode.FULL
 
         try {
-            // Step 1: 获取分类成员
+            // Step 1: 获取分类成员列表
             onProgress(SyncProgress("fetch", 0, 1, "获取角色列表..."))
             val characterTitles = fetchCategoryMembers("角色")
             onProgress(SyncProgress("fetch", 0, 1, "获取光锥列表..."))
@@ -59,53 +78,98 @@ class WikiDataSyncManager(private val dataDir: File) {
 
             val total = characterTitles.size + lightConeTitles.size
             var done = 0
-
-            // Step 2: 拉取角色详情
             val characters = JSONObject()
-            for ((i, title) in characterTitles.withIndex()) {
-                onProgress(SyncProgress("download", i, characterTitles.size, "下载: $title"))
-                try {
-                    val pageData = fetchPageContent(title)
-                    if (pageData != null) {
-                        characters.put(title, pageData)
-                        charsCount++
-                    }
-                } catch (e: Exception) {
-                    errors.add("角色[$title]: ${e.message}")
-                }
-                done++
-                rateLimit()
-            }
-
-            // Step 3: 拉取光锥详情
             val lightCones = JSONObject()
-            for ((i, title) in lightConeTitles.withIndex()) {
-                onProgress(SyncProgress("download", i, lightConeTitles.size, "下载: $title"))
-                try {
-                    val pageData = fetchPageContent(title)
-                    if (pageData != null) {
-                        lightCones.put(title, pageData)
-                        conesCount++
+            val pageVersions = mutableMapOf<String, Long>()
+
+            // Step 2: 下载页面（角色 + 光锥）
+            for ((titles, putTarget) in listOf(
+                characterTitles to characters,
+                lightConeTitles to lightCones
+            )) {
+                for ((i, title) in titles.withIndex()) {
+                    val progressLabel = if (titles === characterTitles) "角色" else "光锥"
+                    onProgress(SyncProgress("download", i, titles.size, "$progressLabel: $title"))
+
+                    try {
+                        // 增量模式下检查是否需要跳过
+                        if (!isFull) {
+                            val pageId = getPageId(title)
+                            val revId = getLatestRevisionId(title)
+                            if (pageId != null && revId != null && !syncState.isPageChanged(pageId, revId)) {
+                                done++
+                                continue // 页面未变更，跳过
+                            }
+                        }
+
+                        val pageData = fetchPageContent(title)
+                        if (pageData != null) {
+                            putTarget.put(title, pageData)
+                            changedCount++
+                            if (titles === characterTitles) charsCount++
+                            else conesCount++
+
+                            // 保存修订 ID
+                            val revId = pageData.optLong("rev_id", 0L)
+                            val pageId = pageData.optString("page_id", "")
+                            if (pageId.isNotBlank() && revId > 0) {
+                                pageVersions[pageId] = revId
+                            }
+                        }
+                    } catch (e: Exception) {
+                        errors.add("$progressLabel[$title]: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    errors.add("光锥[$title]: ${e.message}")
+                    done++
+                    rateLimit()
                 }
-                done++
-                rateLimit()
             }
 
-            // Step 4: 保存到本地
             onProgress(SyncProgress("save", 0, 1, "保存数据..."))
             dataDir.mkdirs()
 
+            // 读取已有数据，合并增量更新
+            val existingFile = File(dataDir, "wiki_data.json")
+            val existing = if (!isFull && existingFile.exists()) {
+                try { JSONObject(existingFile.readText()) } catch (e: Exception) { null }
+            } else null
+
+            // 合并新旧数据
+            val mergedChars = JSONObject()
+            if (existing != null) {
+                val oldChars = existing.optJSONObject("characters")
+                if (oldChars != null) {
+                    for (key in oldChars.keys()) { mergedChars.put(key, oldChars.get(key)) }
+                }
+            }
+            for (key in characters.keys()) { mergedChars.put(key, characters.get(key)) }
+
+            val mergedCones = JSONObject()
+            if (existing != null) {
+                val oldCones = existing.optJSONObject("light_cones")
+                if (oldCones != null) {
+                    for (key in oldCones.keys()) { mergedCones.put(key, oldCones.get(key)) }
+                }
+            }
+            for (key in lightCones.keys()) { mergedCones.put(key, lightCones.get(key)) }
+
+            // 保存
             val output = JSONObject().apply {
                 put("sync_time", System.currentTimeMillis())
-                put("characters", characters)
-                put("light_cones", lightCones)
-                put("character_count", charsCount)
-                put("light_cone_count", conesCount)
+                put("sync_mode", mode.name)
+                put("characters", mergedChars)
+                put("light_cones", mergedCones)
+                put("character_count", mergedChars.length())
+                put("light_cone_count", mergedCones.length())
             }
-            File(dataDir, "wiki_data.json").writeText(output.toString(2), Charsets.UTF_8)
+            existingFile.writeText(output.toString(2), Charsets.UTF_8)
+
+            // 更新同步状态
+            syncState = SyncState(
+                lastSyncTime = System.currentTimeMillis(),
+                pageVersions = syncState.pageVersions + pageVersions,
+                version = syncState.version + 1
+            )
+            SyncState.save(dataDir, syncState)
 
         } catch (e: Exception) {
             errors.add("同步异常: ${e.message ?: "未知错误"}")
@@ -113,8 +177,10 @@ class WikiDataSyncManager(private val dataDir: File) {
 
         return SyncResult(
             success = errors.isEmpty(),
+            mode = mode,
             charactersCount = charsCount,
             lightConesCount = conesCount,
+            changedCount = changedCount,
             errors = errors
         )
     }
@@ -161,7 +227,7 @@ class WikiDataSyncManager(private val dataDir: File) {
         val params = mapOf(
             "action" to "query",
             "prop" to "revisions",
-            "rvprop" to "content",
+            "rvprop" to "content|ids",  // 添加 ids 获取修订版本号
             "format" to "json",
             "titles" to title
         )
@@ -180,8 +246,49 @@ class WikiDataSyncManager(private val dataDir: File) {
                 val meta = extractTemplateFields(wikitext)
                 meta.put("title", title)
                 meta.put("page_id", page.optInt("pageid"))
+                meta.put("rev_id", rev.optLong("revid", 0L))  // 记录修订版本号
                 
                 return meta
+            }
+        }
+        return null
+    }
+
+    /** 获取页面 ID */
+    private fun getPageId(title: String): String? {
+        val params = mapOf(
+            "action" to "query",
+            "prop" to "info",
+            "format" to "json",
+            "titles" to title
+        )
+        val json = apiGet(params)
+        val pages = json.optJSONObject("query")?.optJSONObject("pages") ?: return null
+        for (key in pages.keys()) {
+            val page = pages.optJSONObject(key) ?: continue
+            val pageId = page.optInt("pageid", 0)
+            if (pageId > 0) return pageId.toString()
+        }
+        return null
+    }
+
+    /** 获取页面最新修订版本号 */
+    private fun getLatestRevisionId(title: String): Long? {
+        val params = mapOf(
+            "action" to "query",
+            "prop" to "revisions",
+            "rvprop" to "ids",
+            "rvlimit" to "1",
+            "format" to "json",
+            "titles" to title
+        )
+        val json = apiGet(params)
+        val pages = json.optJSONObject("query")?.optJSONObject("pages") ?: return null
+        for (key in pages.keys()) {
+            val page = pages.optJSONObject(key) ?: continue
+            val revisions = page.optJSONArray("revisions")
+            if (revisions != null && revisions.length() > 0) {
+                return revisions.getJSONObject(0).optLong("revid", 0L)
             }
         }
         return null
