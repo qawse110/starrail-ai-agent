@@ -7,7 +7,6 @@ import com.starrail.agent.team.*
 import com.starrail.agent.upgrade.*
 import com.starrail.agent.player.*
 import com.starrail.agent.core.model.*
-import com.starrail.agent.core.sync.WikiDataLoader
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 
@@ -63,8 +62,7 @@ class ToolExecutor(
     private val eidolonAnalyzer: EidolonAnalyzer = EidolonAnalyzer(),
     private val lightConeAnalyzer: LightConeAnalyzer = LightConeAnalyzer(),
     private val costBenefitAnalyzer: CostBenefitAnalyzer = CostBenefitAnalyzer(),
-    private val dataSource: com.starrail.agent.core.datasource.InMemoryGameDataSource? = null,
-    private val wikiDataLoader: WikiDataLoader? = null
+    private val dataSource: com.starrail.agent.core.datasource.InMemoryGameDataSource? = null
 ) {
     /** 所有可用工具 */
     private val tools: Map<String, ToolDefinition> = buildToolDefinitions()
@@ -1030,63 +1028,48 @@ private fun executeAnalyzeLightCone(parameters: Map<String, Any?>): Map<String, 
 
     /** Wiki 数据查询工具 */
     private fun executeSearchWikiData(parameters: Map<String, Any?>): Map<String, Any?> {
-        val loader = wikiDataLoader
-        if (loader == null || !loader.hasData()) {
-            return mapOf("error" to "未找到 Wiki 数据缓存，请先在设置页同步数据")
+        val ds = dataSource
+        if (ds == null) {
+            return mapOf("error" to "数据源不可用")
         }
 
         val query = (parameters["query"] as? String ?: "").trim()
-        val type = (parameters["type"] as? String ?: "auto").trim()
-        val path = (parameters["path"] as? String ?: "").trim()
+        val type = (parameters["type"] as? String ?: "auto").trim().lowercase()
+        val pathFilter = (parameters["path"] as? String ?: "").trim()
 
-        val results = mutableListOf<Map<String, String>>()
+        return when {
+            // 角色查询
+            type in listOf("character", "角色") || (type == "auto" && query.length >= 1) -> {
+                val chars = if (pathFilter.isNotBlank()) {
+                    PathType.entries.find { it.displayName == pathFilter || it.name == pathFilter }
+                        ?.let { ds.getCharactersByPath(it) } ?: ds.searchCharacters(query)
+                } else ds.searchCharacters(query)
 
-        when (type.lowercase()) {
-            "character", "角色" -> {
-                if (path.isNotBlank()) {
-                    results.addAll(loader.listCharactersByPath(path))
-                } else if (query.isNotBlank()) {
-                    results.addAll(loader.searchCharacter(query))
-                } else {
-                    results.addAll(loader.listAllCharacters().take(30))
-                }
+                val results = chars.take(30).map { c -> mapOf(
+                    "名称" to c.name, "稀有度" to "${c.rarity}星",
+                    "命途" to c.path.displayName, "属性" to c.element.displayName,
+                    "阵营" to (c.resonance ?: "")
+                )}
+                mapOf("type" to type, "query" to query, "total" to chars.size, "results" to results)
             }
-            "lightcone", "光锥" -> {
-                if (path.isNotBlank()) {
-                    results.addAll(loader.listLightConesByPath(path))
-                } else if (query.isNotBlank()) {
-                    results.addAll(loader.searchLightCone(query))
-                } else {
-                    results.addAll(loader.listAllLightCones().take(30))
-                }
+            // 光锥查询
+            type in listOf("lightcone", "光锥") -> {
+                val cones = if (pathFilter.isNotBlank()) {
+                    PathType.entries.find { it.displayName == pathFilter || it.name == pathFilter }
+                        ?.let { ds.getLightConesByPath(it) } ?: ds.searchLightCones(query)
+                } else ds.searchLightCones(query)
+
+                val results = cones.take(30).map { lc -> mapOf(
+                    "名称" to lc.name, "稀有度" to "${lc.rarity}星", "命途" to lc.path.displayName
+                )}
+                mapOf("type" to type, "query" to query, "total" to cones.size, "results" to results)
             }
-            else -> {
-                // auto: 先搜角色，再搜光锥
-                if (query.isNotBlank()) {
-                    results.addAll(loader.searchCharacter(query))
-                    if (results.isEmpty()) {
-                        results.addAll(loader.searchLightCone(query))
-                    }
-                } else {
-                    val stats = loader.getStats()
-                    return mapOf(
-                        "stats" to "Wiki 数据包含 ${stats["characters"]} 名角色、${stats["light_cones"]} 个光锥",
-                        "available_types" to listOf("character", "lightcone"),
-                        "usage" to "使用 type=character|lightcone 筛选，query=关键词 搜索，path=命途 筛选"
-                    )
-                }
-            }
+            else -> mapOf(
+                "available_types" to listOf("character", "lightcone"),
+                "stats" to "数据源包含 ${ds.getAllCharacters().size} 名角色、${ds.getAllLightCones().size} 个光锥",
+                "usage" to "type=character|lightcone 筛选，query=关键词 搜索，path=命途 筛选"
+            )
         }
-
-        val limited = results.take(20)
-        return mapOf(
-            "type" to type,
-            "query" to query,
-            "total" to results.size,
-            "returned" to limited.size,
-            "results" to limited,
-            "has_more" to (results.size > 20)
-        )
     }
     
     /** 构建工具定义 */
