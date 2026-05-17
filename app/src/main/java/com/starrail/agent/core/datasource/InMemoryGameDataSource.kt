@@ -33,7 +33,7 @@ class InMemoryGameDataSource(private val wikiJsonContent: String? = null) {
         for (title in wikiChars.keys()) {
             try {
                 val page = wikiChars.getJSONObject(title)
-                val name = page.optString("名称", title).trim()
+                val name = page.optString("名称", "").trim().ifEmpty { title }
                 val rarityStr = page.optString("稀有度", "").trim()
                 val pathStr = page.optString("命途", "").trim()
                 val elemStr = page.optString("元素属性", "").trim()
@@ -86,7 +86,7 @@ class InMemoryGameDataSource(private val wikiJsonContent: String? = null) {
         for (title in wikiCones.keys()) {
             try {
                 val page = wikiCones.getJSONObject(title)
-                val name = page.optString("名称", title).trim()
+                val name = page.optString("名称", "").trim().ifEmpty { title }
                 val rarityStr = page.optString("稀有度", "").trim()
                 val pathStr = page.optString("命途", "").trim()
                 
