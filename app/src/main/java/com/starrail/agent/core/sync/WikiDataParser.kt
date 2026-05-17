@@ -101,18 +101,27 @@ object WikiDataParser {
         hardcodedChars: List<Character>
     ): List<Character> {
         val wikiMap = wikiChars.associateBy { it.name }
-        return hardcodedChars.map { hc ->
+        val hardcodedNames = hardcodedChars.map { it.name }.toSet()
+        
+        val merged = hardcodedChars.map { hc ->
             val wiki = wikiMap[hc.name]
             if (wiki != null) {
-                // 用 wiki 的元数据覆盖硬编码（保留硬编码的战斗数据）
                 hc.copy(
                     rarity = wiki.rarity,
                     path = wiki.path,
                     element = wiki.element,
                     resonance = wiki.resonance ?: hc.resonance
                 )
-            } else hc // wiki 中没有的保留原样
+            } else hc
+        }.toMutableList()
+        
+        // 追加 wiki 有但硬编码没有的角色
+        for (wc in wikiChars) {
+            if (wc.name !in hardcodedNames) {
+                merged.add(wc)
+            }
         }
+        return merged
     }
 
     /** 合并 wiki 光锥元数据 */
@@ -121,12 +130,22 @@ object WikiDataParser {
         hardcodedCones: List<LightCone>
     ): List<LightCone> {
         val wikiMap = wikiCones.associateBy { it.name }
-        return hardcodedCones.map { hc ->
+        val hardcodedNames = hardcodedCones.map { it.name }.toSet()
+        
+        val merged = hardcodedCones.map { hc ->
             val wiki = wikiMap[hc.name]
             if (wiki != null) {
                 hc.copy(rarity = wiki.rarity, path = wiki.path)
             } else hc
+        }.toMutableList()
+        
+        // 追加 wiki 有但硬编码没有的光锥
+        for (wc in wikiCones) {
+            if (wc.name !in hardcodedNames) {
+                merged.add(wc)
+            }
         }
+        return merged
     }
 
     /** 检查 wiki 数据是否包含补充数据（技能/星魂等）的占位 */

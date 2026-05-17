@@ -361,9 +361,10 @@ private val ElementType.color: Color get() = when (this) {
     ElementType.冰 -> Color(0xFF6BB5C5)
     ElementType.雷 -> Color(0xFFB45BC8)
     ElementType.风 -> Color(0xFF7CC47C)
-    ElementType.量子 -> Color(0xFF878BBF)
-    ElementType.虚数 -> Color(0xFFE1C25E)
-}
+        ElementType.量子 -> Color(0xFF878BBF)
+        ElementType.虚数 -> Color(0xFFE1C25E)
+        ElementType.幻想 -> Color(0xFFFF6B9D)
+    }
 
 /** 技能类型中文名 */
 private val SkillType.displayName: String get() = when (this) {

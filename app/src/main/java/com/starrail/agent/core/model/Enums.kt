@@ -3,14 +3,15 @@ package com.starrail.agent.core.model
 /** 游戏内枚举类型统一定义 */
 enum class PathType(val displayName: String) {
     毁灭("毁灭"), 巡猎("巡猎"), 智识("智识"),
-    同谐("同谐"), 虚无("虚无"), 存护("存护"), 丰饶("丰饶");
+    同谐("同谐"), 虚无("虚无"), 存护("存护"), 丰饶("丰饶"),
+    记忆("记忆"), 欢愉("欢愉");  // 3.0+ 新增命途
     companion object {
         fun fromString(v: String): PathType? = entries.find { it.name == v || it.displayName == v }
     }
 }
 
 enum class ElementType(val displayName: String) {
-    物理("物理"), 火("火"), 冰("冰"), 雷("雷"), 风("风"), 虚数("虚数"), 量子("量子");
+    物理("物理"), 火("火"), 冰("冰"), 雷("雷"), 风("风"), 虚数("虚数"), 量子("量子"), 幻想("幻想");
     companion object {
         fun fromString(v: String): ElementType? = entries.find { it.name == v }
     }
