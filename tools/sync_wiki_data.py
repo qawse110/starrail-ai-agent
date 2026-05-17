@@ -134,19 +134,33 @@ def extract_template_fields(wikitext):
                     value = parts[1].strip() if len(parts) > 1 else ""
                     meta[key] = clean_wiki_text_for_value(value)
     
-    # 提取角色/技能模板（星魂、行迹数据）
-    skill_m = re.search(r'\{\{角色/技能\s*\n(.*?)\n\}\}', wikitext, re.DOTALL)
-    if skill_m:
-        skill_text = skill_m.group(1)
-        skill_meta = {}
-        for line in skill_text.split("\n"):
-            line = line.strip()
-            if line.startswith("|") and "=" in line:
-                parts = line[1:].split("=", 1)
-                key = parts[0].strip()
-                value = parts[1].strip() if len(parts) > 1 else ""
-                skill_meta["技能_" + key] = clean_wiki_text_for_value(value)
-        meta.update(skill_meta)
+    # 提取角色/技能模板（多种变体）
+    skill_templates = [
+        r'\{\{角色/技能\s*\n(.*?)\n\}\}',
+        r'\{\{角色/技能\|(.*?)\}\}',
+        r'\{\{技能\s*\n(.*?)\n\}\}',
+        r'\{\{技能\|(.*?)\}\}',
+    ]
+    for pattern in skill_templates:
+        skill_m = re.search(pattern, wikitext, re.DOTALL)
+        if skill_m:
+            skill_text = skill_m.group(1)
+            skill_meta = {}
+            for line in skill_text.split("\n"):
+                line = line.strip()
+                if line.startswith("|") and "=" in line:
+                    parts = line[1:].split("=", 1)
+                    key = parts[0].strip()
+                    value = parts[1].strip() if len(parts) > 1 else ""
+                    skill_meta["技能_" + key] = clean_wiki_text_for_value(value)
+                elif "=" in line and not line.startswith("{{"):
+                    # 内联格式: key=value
+                    parts = line.split("=", 1)
+                    key = parts[0].strip()
+                    value = parts[1].strip() if len(parts) > 1 else ""
+                    skill_meta["技能_" + key] = clean_wiki_text_for_value(value)
+            meta.update(skill_meta)
+            break  # 找到一个就够
     
     # 解析基础属性
     _parse_stats(meta)
