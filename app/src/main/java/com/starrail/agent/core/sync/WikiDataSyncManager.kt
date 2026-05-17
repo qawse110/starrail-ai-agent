@@ -69,6 +69,7 @@ class WikiDataSyncManager(private val dataDir: File) {
         var changedCount = 0
         val isFull = mode == SyncMode.FULL
         var output: JSONObject? = null
+        val startTime = System.currentTimeMillis()
 
         try {
             // 分类定义：名称 → 模板名 → 输出key
@@ -170,8 +171,9 @@ class WikiDataSyncManager(private val dataDir: File) {
     private fun fetchCategoryMembers(category: String): List<String> {
         val members = mutableListOf<String>()
         var cmcontinue: String? = null
+        var maxPages = 500  // 防止无限循环
 
-        while (true) {
+        while (maxPages-- > 0) {
             val params = mutableMapOf(
                 "action" to "query",
                 "list" to "categorymembers",
@@ -192,6 +194,8 @@ class WikiDataSyncManager(private val dataDir: File) {
                         members.add(title)
                     }
                 }
+            } else {
+                break  // 没有 query 字段，停止
             }
 
             val cont = json.optJSONObject("continue")
@@ -310,17 +314,37 @@ class WikiDataSyncManager(private val dataDir: File) {
         }
         val url = URL("$API_BASE?$queryString")
         
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "GET"
-        conn.connectTimeout = 15000
-        conn.readTimeout = 30000
-        
-        return try {
-            val body = conn.inputStream.bufferedReader().readText()
-            JSONObject(body)
-        } finally {
-            conn.disconnect()
+        var lastException: Exception? = null
+        // 重试3次
+        for (attempt in 1..3) {
+            try {
+                val conn = url.openConnection() as HttpURLConnection
+                try {
+                    conn.requestMethod = "GET"
+                    conn.connectTimeout = 15000
+                    conn.readTimeout = 30000
+                    conn.setRequestProperty("User-Agent", "StarRailAI-Agent/1.0 (Android)")
+                    conn.setRequestProperty("Accept", "application/json")
+
+                    val responseCode = conn.responseCode
+                    if (responseCode != HttpURLConnection.HTTP_OK) {
+                        val errorBody = try { conn.errorStream?.bufferedReader()?.readText() ?: "" } catch (_: Exception) { "" }
+                        throw java.io.IOException("HTTP $responseCode: $errorBody")
+                    }
+
+                    val body = conn.inputStream.bufferedReader().readText()
+                    return JSONObject(body)
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (e: Exception) {
+                lastException = e
+                if (attempt < 3) {
+                    Thread.sleep(1000L * attempt) // 指数退避
+                }
+            }
         }
+        throw lastException ?: java.io.IOException("API请求失败")
     }
 
     /** 限流控制 */

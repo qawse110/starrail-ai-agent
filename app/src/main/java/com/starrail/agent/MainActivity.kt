@@ -1013,6 +1013,7 @@ fun QuickActionBar(onAction: (String) -> Unit) {
 fun DataManagementCard() {
     val context = LocalContext.current
     val dao = remember { AppDatabase.getFileInstance(context.filesDir).playerDao() }
+    val scope = rememberCoroutineScope()
     
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -1079,7 +1080,7 @@ fun DataManagementCard() {
                     onClick = {
                         isSyncing = true
                         syncProgress = "全量同步：正在获取数据列表..."
-                        kotlinx.coroutines.MainScope().launch {
+                        scope.launch {
                             val syncManager = WikiDataSyncManager(context.filesDir)
                             val result = withContext(Dispatchers.IO) {
                                 syncManager.syncAll { progress ->
@@ -1096,7 +1097,7 @@ fun DataManagementCard() {
                             } else if (result.success && result.changedCount == 0) {
                                 statusMessage = "✅ 数据已是最新，无需更新"
                             } else {
-                                statusMessage = "⚠️ ${modeLabel}同步部分完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 + ${result.relicSetsCount}遗器 (${result.errors.size}个错误)"
+                                statusMessage = "⚠️ ${modeLabel}同步失败 — ${result.errors.size}个错误，已同步${result.charactersCount}角色/${result.lightConesCount}光锥/${result.relicSetsCount}遗器"
                             }
                         }
                     },
@@ -1112,7 +1113,7 @@ fun DataManagementCard() {
                     onClick = {
                         isSyncing = true
                         syncProgress = "增量同步：检查页面变更..."
-                        kotlinx.coroutines.MainScope().launch {
+                        scope.launch {
                             val syncManager = WikiDataSyncManager(context.filesDir)
                             val result = withContext(Dispatchers.IO) {
                                 syncManager.syncIncremental { progress ->
@@ -1130,7 +1131,7 @@ fun DataManagementCard() {
                             } else if (result.success && result.changedCount == 0) {
                                 statusMessage = "✅ 数据已是最新，无需更新"
                             } else {
-                                statusMessage = "⚠️ ${modeLabel}同步部分完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 + ${result.relicSetsCount}遗器 (${result.errors.size}个错误)"
+                                statusMessage = "⚠️ ${modeLabel}同步失败 — ${result.errors.size}个错误，已同步${result.charactersCount}角色/${result.lightConesCount}光锥/${result.relicSetsCount}遗器"
                             }
                         }
                     },
