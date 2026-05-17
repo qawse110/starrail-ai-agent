@@ -21,3 +21,7 @@ setup_android_env.sh
 # 覆盖子目录 build 目录
 app/build/
 */build/
+
+# Python 缓存
+__pycache__/
+*.pyc
