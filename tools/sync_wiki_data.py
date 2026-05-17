@@ -29,7 +29,7 @@ CATEGORIES = [
 
 
 def api_get(params):
-    """调用 MediaWiki API"""
+    """调用 MediaWiki API（带重试和响应格式校验）"""
     query_string = urllib.parse.urlencode(params)
     url = f"{API_BASE}?{query_string}"
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
@@ -38,11 +38,14 @@ def api_get(params):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 body = resp.read().decode("utf-8")
+                # 检查是否是HTML（非JSON响应）
+                if body.strip().startswith("<!") or body.strip().startswith("<"):
+                    raise Exception(f"返回HTML而非JSON (可能被限流或服务不可用)")
                 return json.loads(body)
         except Exception as e:
             print(f"  API重试 {attempt+1}/3: {e}", file=sys.stderr)
             if attempt < 2:
-                time.sleep(1 * (attempt + 1))
+                time.sleep(3 * (attempt + 1))  # 增加等待时间
     raise Exception(f"API请求失败: {url}")
 
 
@@ -105,28 +108,91 @@ def fetch_page_content(title):
 
 
 def extract_template_fields(wikitext):
-    """从 wiki 模板提取字段"""
+    """从 wiki 模板提取字段（增强版：保留全部数据，解析属性数值）"""
+    import re
     meta = {}
+    
     for line in wikitext.split("\n"):
         line = line.strip()
         if line.startswith("|") and "=" in line:
             parts = line[1:].split("=", 1)
             key = parts[0].strip()
             value = parts[1].strip() if len(parts) > 1 else ""
-            meta[key] = clean_wiki_text(value)
+            # 保留原始值，仅做基本清理
+            meta[key] = clean_wiki_text_for_value(value)
+    
+    # 如果没提取到，尝试用正则
+    if not meta:
+        # 从 {{角色图鉴 模板中提取
+        m = re.search(r'\{\{角色图鉴\s*\n(.*?)\n\}\}', wikitext, re.DOTALL)
+        if m:
+            for line in m.group(1).split("\n"):
+                line = line.strip()
+                if line.startswith("|") and "=" in line:
+                    parts = line[1:].split("=", 1)
+                    key = parts[0].strip()
+                    value = parts[1].strip() if len(parts) > 1 else ""
+                    meta[key] = clean_wiki_text_for_value(value)
+    
+    # 提取角色/技能模板（星魂、行迹数据）
+    skill_m = re.search(r'\{\{角色/技能\s*\n(.*?)\n\}\}', wikitext, re.DOTALL)
+    if skill_m:
+        skill_text = skill_m.group(1)
+        skill_meta = {}
+        for line in skill_text.split("\n"):
+            line = line.strip()
+            if line.startswith("|") and "=" in line:
+                parts = line[1:].split("=", 1)
+                key = parts[0].strip()
+                value = parts[1].strip() if len(parts) > 1 else ""
+                skill_meta["技能_" + key] = clean_wiki_text_for_value(value)
+        meta.update(skill_meta)
+    
+    # 解析基础属性
+    _parse_stats(meta)
+    
     return meta
 
 
-def clean_wiki_text(text):
-    """清理 wiki 标记"""
+def clean_wiki_text_for_value(text):
+    """清理 wiki 文本但保留完整内容（不再截断200字）"""
     import re
-    text = re.sub(r"\{\{.*?}}", "", text)
-    text = re.sub(r"<.*?>", "", text)
-    text = re.sub(r"'''", "", text)
-    text = text.replace("''", "")
-    text = re.sub(r"\[\[[^|]+\|([^\]]+)\]\]", r"\1", text)
-    text = re.sub(r"\[\[([^\]]+)\]\]", r"\1", text)
-    return text.strip()[:200]
+    # 移除注释
+    text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
+    # 简化颜色模板 {{颜色|类型|文字}} → 文字
+    text = re.sub(r'\{\{颜色\|[^|]*\|([^}]*)\}\}', r'\1', text)
+    # 移除其他模板（保留模板名）
+    text = re.sub(r'\{\{[^}]*\}\}', '', text)
+    # 移除HTML标签
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', '', text)
+    # 简化Wiki链接
+    text = re.sub(r'\[\[([^|]+)\|([^\]]+)\]\]', r'\2', text)
+    text = re.sub(r'\[\[([^\]]+)\]\]', r'\1', text)
+    # 移除粗斜体标记
+    text = text.replace("'''", "").replace("''", "")
+    return text.strip()
+
+
+STAT_KEYS = {
+    '速度': 'spd', '生命值': 'hp_lv1', '80生命值': 'hp_lv80',
+    '攻击力': 'atk_lv1', '80攻击力': 'atk_lv80',
+    '防御力': 'def_lv1', '80防御力': 'def_lv80',
+}
+
+
+def _parse_stats(meta):
+    """解析基础属性字段"""
+    stats = {}
+    for wiki_key, stat_key in STAT_KEYS.items():
+        if wiki_key in meta:
+            val = meta[wiki_key]
+            try:
+                stats[stat_key] = float(val)
+            except (ValueError, TypeError):
+                pass
+    if stats:
+        meta['_stats'] = stats
 
 
 def main():
