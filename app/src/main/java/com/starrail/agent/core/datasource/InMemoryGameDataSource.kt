@@ -30,7 +30,10 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
         for (title in wikiChars.keys()) {
             try {
                 val page = wikiChars.getJSONObject(title)
-                val name = page.optString("名称", "").trim().ifEmpty { title }
+                // ⚠️ Wiki的"名称"字段是秘技名称/称号，不是角色名！
+                // 角色名是JSON key (page title)
+                val name = title
+                val tagline = page.optString("名称", "").trim()
                 val rarityStr = page.optString("稀有度", "").trim()
                 val pathStr = page.optString("命途", "").trim()
                 val elemStr = page.optString("元素属性", "").trim()
@@ -81,11 +84,11 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
         
         val result = mutableListOf<LightCone>()
         val hardcoded = createLightCones().associateBy { it.name }
-        val hardcodedNames = hardcoded.keys
         
         for (title in wikiCones.keys()) {
             try {
                 val page = wikiCones.getJSONObject(title)
+                // 光锥的"名称"字段是真正的名称，但兜底用title
                 val name = page.optString("名称", "").trim().ifEmpty { title }
                 val rarityStr = page.optString("稀有度", "").trim()
                 val pathStr = page.optString("命途", "").trim()
@@ -97,6 +100,17 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
                 }
                 val path = parsePath(pathStr) ?: continue
                 
+                // 解析光锥属性
+                val coneStats = parseWikiStats(page)
+                // 解析光锥技能
+                val skillName = page.optString("技能名称", "").trim()
+                val skillEffect = page.optString("技能效果", "").trim()
+                val coneSkill = if (skillName.isNotBlank()) {
+                    LightConeSkill(skillName, skillEffect.take(200), emptyList())
+                } else {
+                    LightConeSkill("", "", emptyList())
+                }
+                
                 val hc = hardcoded[name]
                 if (hc != null) {
                     result.add(hc.copy(rarity = rarity, path = path))
@@ -104,9 +118,9 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
                     result.add(LightCone(
                         id = "wiki_lc_${name}",
                         name = name, rarity = rarity, path = path,
-                        baseStats = BaseStats(0.0, 0.0, 0.0, 0.0),
+                        baseStats = coneStats,
                         ascensionStats = emptyMap(),
-                        skill = LightConeSkill("", "", emptyList()),
+                        skill = coneSkill,
                         superimposeLevels = emptyList()
                     ))
                 }
@@ -168,8 +182,10 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
             SkillDef("秘技", "technique", SkillType.TECHNIQUE)
         )
         for (d in defs) {
-            val name = page.optString("${p}${d.key}名称", "").ifEmpty { page.optString("${d.key}名称", "") }
-            val desc = page.optString("${p}${d.key}描述", "").ifEmpty { page.optString("${d.key}描述", "") }
+            // Wiki字段名: 技能_普攻 (名称), 技能_普攻描述 (描述)
+            // 不是 技能_普攻名称
+            val name = page.optString("${p}${d.key}", "")
+            val desc = page.optString("${p}${d.key}描述", "")
             if (name.isNotBlank()) {
                 list.add(Skill(id = d.id, type = d.type, name = name, description = desc, scaling = emptyList()))
             }
