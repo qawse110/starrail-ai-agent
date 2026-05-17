@@ -6,21 +6,18 @@ import org.json.JSONObject
 /**
  * 基于内存的游戏数据源实现
  * 优先使用 Wiki 数据，回退到硬编码数据
+ *
+ * @param wikiJson 已解析的 Wiki JSON 对象（由 MainActivity 从 assets 加载）
  */
-class InMemoryGameDataSource(private val wikiJsonContent: String? = null) {
+class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
     
     private val characters: List<Character> by lazy { loadCharacters() }
     private val lightCones: List<LightCone> by lazy { loadLightCones() }
     private val relicSets: List<RelicSet> by lazy { createRelicSets() }
     private val enemies: List<Enemy> by lazy { createEnemies() }
     
-    private fun parseWikiJson(): JSONObject? {
-        val content = wikiJsonContent ?: return null
-        return try { JSONObject(content) } catch (_: Exception) { null }
-    }
-    
     private fun loadCharacters(): List<Character> {
-        val wiki = parseWikiJson()
+        val wiki = wikiJson
         if (wiki == null) return createCharacters()
         
         val wikiChars = wiki.optJSONObject("characters") ?: return createCharacters()
@@ -73,7 +70,7 @@ class InMemoryGameDataSource(private val wikiJsonContent: String? = null) {
     }
     
     private fun loadLightCones(): List<LightCone> {
-        val wiki = parseWikiJson()
+        val wiki = wikiJson
         if (wiki == null) return createLightCones()
         
         val wikiCones = wiki.optJSONObject("light_cones") ?: return createLightCones()

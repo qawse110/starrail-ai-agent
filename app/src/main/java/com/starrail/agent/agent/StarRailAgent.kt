@@ -11,6 +11,7 @@ import com.starrail.agent.upgrade.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import org.json.JSONObject
 
 /**
  * AI Agent 编排器
@@ -22,11 +23,11 @@ import java.util.UUID
 class StarRailAgent(
     private val llmService: LlmService? = null,
     private val conversationRepo: ConversationRepository? = null,
-    private val wikiJsonContent: String? = null
+    private val wikiJson: JSONObject? = null
 ) {
     
     /** 游戏数据源（使用 Wiki 数据增强） */
-    val gameDataSource = InMemoryGameDataSource(wikiJsonContent)
+    val gameDataSource = InMemoryGameDataSource(wikiJson)
     private val intentResolver = IntentResolver()
     private val toolExecutor = ToolExecutor(
         relicScorer = RelicScorer(),

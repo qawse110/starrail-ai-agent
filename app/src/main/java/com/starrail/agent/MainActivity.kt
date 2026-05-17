@@ -125,10 +125,11 @@ class MainActivity : ComponentActivity() {
 
     private fun createAgentFromSettings(): StarRailAgent {
         val settings = llmSettings.load()
-        // 从 assets 加载 Wiki 数据
+        // 从 assets 加载 Wiki 数据，解析为 JSONObject
         val wikiJson = try {
             val inputStream = assets.open("wiki_data.json")
-            inputStream.bufferedReader().readText().also { inputStream.close() }
+            val text = inputStream.bufferedReader().readText().also { inputStream.close() }
+            org.json.JSONObject(text)
         } catch (e: Exception) {
             null
         }
