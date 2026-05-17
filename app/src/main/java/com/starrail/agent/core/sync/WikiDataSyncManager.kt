@@ -25,7 +25,8 @@ class WikiDataSyncManager(private val dataDir: File) {
         private val REQUEST_INTERVAL_MS = 500L  // 避免触发限流
         private val CATEGORIES = mapOf(
             "角色" to "角色图鉴",
-            "光锥" to "光锥图鉴"
+            "光锥" to "光锥图鉴",
+            "遗器" to "遗器套装"
         )
     }
 
@@ -47,6 +48,7 @@ class WikiDataSyncManager(private val dataDir: File) {
         val mode: SyncMode = SyncMode.FULL,
         val charactersCount: Int = 0,
         val lightConesCount: Int = 0,
+        val relicSetsCount: Int = 0,
         val changedCount: Int = 0,       // 增量模式下有变更的页面数
         val errors: List<String> = emptyList()
     )
@@ -64,52 +66,42 @@ class WikiDataSyncManager(private val dataDir: File) {
     /** 核心同步方法 */
     private fun sync(mode: SyncMode, onProgress: (SyncProgress) -> Unit): SyncResult {
         val errors = mutableListOf<String>()
-        var charsCount = 0
-        var conesCount = 0
         var changedCount = 0
         val isFull = mode == SyncMode.FULL
+        var output: JSONObject? = null
 
         try {
-            // Step 1: 获取分类成员列表
-            onProgress(SyncProgress("fetch", 0, 1, "获取角色列表..."))
-            val characterTitles = fetchCategoryMembers("角色")
-            onProgress(SyncProgress("fetch", 0, 1, "获取光锥列表..."))
-            val lightConeTitles = fetchCategoryMembers("光锥")
+            // 分类定义：名称 → 模板名 → 输出key
+            val categories = listOf(
+                Triple("角色", "角色图鉴", "characters"),
+                Triple("光锥", "光锥图鉴", "light_cones"),
+                Triple("遗器", "遗器套装", "relic_sets")
+            )
 
-            val total = characterTitles.size + lightConeTitles.size
-            var done = 0
-            val characters = JSONObject()
-            val lightCones = JSONObject()
+            val allResults = mutableMapOf<String, JSONObject>()
             val pageVersions = mutableMapOf<String, Long>()
 
-            // Step 2: 下载页面（角色 + 光锥）
-            for ((titles, putTarget) in listOf(
-                characterTitles to characters,
-                lightConeTitles to lightCones
-            )) {
+            for ((catName, _, outputKey) in categories) {
+                onProgress(SyncProgress("fetch", 0, 1, "获取${catName}列表..."))
+                val titles = fetchCategoryMembers(catName)
+
+                val resultMap = JSONObject()
                 for ((i, title) in titles.withIndex()) {
-                    val progressLabel = if (titles === characterTitles) "角色" else "光锥"
-                    onProgress(SyncProgress("download", i, titles.size, "$progressLabel: $title"))
+                    onProgress(SyncProgress("download", i, titles.size, "$catName: $title"))
 
                     try {
-                        // 增量模式下检查是否需要跳过
+                        // 增量模式跳过未变更页面
                         if (!isFull) {
                             val pageId = getPageId(title)
                             val revId = getLatestRevisionId(title)
                             if (pageId != null && revId != null && !syncState.isPageChanged(pageId, revId)) {
-                                done++
-                                continue // 页面未变更，跳过
+                                continue
                             }
                         }
 
                         val pageData = fetchPageContent(title)
                         if (pageData != null) {
-                            putTarget.put(title, pageData)
-                            changedCount++
-                            if (titles === characterTitles) charsCount++
-                            else conesCount++
-
-                            // 保存修订 ID
+                            resultMap.put(title, pageData)
                             val revId = pageData.optLong("rev_id", 0L)
                             val pageId = pageData.optString("page_id", "")
                             if (pageId.isNotBlank() && revId > 0) {
@@ -117,51 +109,39 @@ class WikiDataSyncManager(private val dataDir: File) {
                             }
                         }
                     } catch (e: Exception) {
-                        errors.add("$progressLabel[$title]: ${e.message}")
+                        errors.add("$catName[$title]: ${e.message}")
                     }
-                    done++
                     rateLimit()
                 }
+                allResults[outputKey] = resultMap
             }
 
+            // 合并增量数据
             onProgress(SyncProgress("save", 0, 1, "保存数据..."))
             dataDir.mkdirs()
-
-            // 读取已有数据，合并增量更新
             val existingFile = File(dataDir, "wiki_data.json")
             val existing = if (!isFull && existingFile.exists()) {
                 try { JSONObject(existingFile.readText()) } catch (e: Exception) { null }
             } else null
 
-            // 合并新旧数据
-            val mergedChars = JSONObject()
-            if (existing != null) {
-                val oldChars = existing.optJSONObject("characters")
-                if (oldChars != null) {
-                    for (key in oldChars.keys()) { mergedChars.put(key, oldChars.get(key)) }
+            val jsonOutput = JSONObject().also { output = it }
+            for ((_, _, outputKey) in categories) {
+                val merged = JSONObject()
+                if (existing != null) {
+                    val old = existing.optJSONObject(outputKey)
+                    if (old != null) {
+                        for (key in old.keys()) { merged.put(key, old.get(key)) }
+                    }
                 }
+                val newData = allResults[outputKey] ?: JSONObject()
+                for (key in newData.keys()) { merged.put(key, newData.get(key)) }
+                jsonOutput.put(outputKey, merged)
+                jsonOutput.put("${outputKey}_count", merged.length())
             }
-            for (key in characters.keys()) { mergedChars.put(key, characters.get(key)) }
+            jsonOutput.put("sync_time", System.currentTimeMillis())
+            jsonOutput.put("sync_mode", mode.name)
 
-            val mergedCones = JSONObject()
-            if (existing != null) {
-                val oldCones = existing.optJSONObject("light_cones")
-                if (oldCones != null) {
-                    for (key in oldCones.keys()) { mergedCones.put(key, oldCones.get(key)) }
-                }
-            }
-            for (key in lightCones.keys()) { mergedCones.put(key, lightCones.get(key)) }
-
-            // 保存
-            val output = JSONObject().apply {
-                put("sync_time", System.currentTimeMillis())
-                put("sync_mode", mode.name)
-                put("characters", mergedChars)
-                put("light_cones", mergedCones)
-                put("character_count", mergedChars.length())
-                put("light_cone_count", mergedCones.length())
-            }
-            existingFile.writeText(output.toString(2), Charsets.UTF_8)
+            existingFile.writeText(jsonOutput.toString(2), Charsets.UTF_8)
 
             // 更新同步状态
             syncState = SyncState(
@@ -178,8 +158,9 @@ class WikiDataSyncManager(private val dataDir: File) {
         return SyncResult(
             success = errors.isEmpty(),
             mode = mode,
-            charactersCount = charsCount,
-            lightConesCount = conesCount,
+            charactersCount = output?.optInt("characters_count") ?: 0,
+            lightConesCount = output?.optInt("light_cones_count") ?: 0,
+            relicSetsCount = output?.optInt("relic_sets_count") ?: 0,
             changedCount = changedCount,
             errors = errors
         )

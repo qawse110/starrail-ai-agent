@@ -1092,11 +1092,11 @@ fun DataManagementCard() {
                             val changedInfo = if (result.changedCount > 0) " (${result.changedCount}个变更)" else ""
                             if (result.success && result.charactersCount > 0) {
                                 val size = if (wikiDataFile.exists()) "${wikiDataFile.length() / 1024}KB" else "?"
-                                statusMessage = "✅ ${modeLabel}同步完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥$changedInfo ($size)"
+                                statusMessage = "✅ ${modeLabel}同步完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 + ${result.relicSetsCount}遗器$changedInfo ($size)"
                             } else if (result.success && result.changedCount == 0) {
                                 statusMessage = "✅ 数据已是最新，无需更新"
                             } else {
-                                statusMessage = "⚠️ ${modeLabel}同步部分完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 (${result.errors.size}个错误)"
+                                statusMessage = "⚠️ ${modeLabel}同步部分完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 + ${result.relicSetsCount}遗器 (${result.errors.size}个错误)"
                             }
                         }
                     },
@@ -1126,11 +1126,11 @@ fun DataManagementCard() {
                             val changedInfo = if (result.changedCount > 0) " (${result.changedCount}个变更)" else ""
                             if (result.success && result.charactersCount > 0) {
                                 val size = if (wikiDataFile.exists()) "${wikiDataFile.length() / 1024}KB" else "?"
-                                statusMessage = "✅ ${modeLabel}同步完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥$changedInfo ($size)"
+                                statusMessage = "✅ ${modeLabel}同步完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 + ${result.relicSetsCount}遗器$changedInfo ($size)"
                             } else if (result.success && result.changedCount == 0) {
                                 statusMessage = "✅ 数据已是最新，无需更新"
                             } else {
-                                statusMessage = "⚠️ ${modeLabel}同步部分完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 (${result.errors.size}个错误)"
+                                statusMessage = "⚠️ ${modeLabel}同步部分完成 — ${result.charactersCount}角色 + ${result.lightConesCount}光锥 + ${result.relicSetsCount}遗器 (${result.errors.size}个错误)"
                             }
                         }
                     },
