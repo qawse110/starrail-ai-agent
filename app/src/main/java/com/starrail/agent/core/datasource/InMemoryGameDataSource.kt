@@ -48,13 +48,16 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
                         resonance = if (faction.isNotBlank()) faction else hc.resonance
                     ))
                 } else {
-                    // Wiki独有角色
+                    // Wiki独有角色 - 尝试解析完整数据
+                    val baseStats = parseWikiStats(page)
+                    val eidolons = parseWikiEidolons(page)
+                    val skills = parseWikiSkills(page, element)
                     result.add(Character(
                         id = "wiki_${name}",
                         name = name, rarity = rarity, path = path, element = element,
-                        baseStats = BaseStats(0.0, 0.0, 0.0, 0.0),
+                        baseStats = baseStats,
                         ascensionStats = emptyMap(),
-                        skills = emptyList(), traces = emptyList(), eidolons = emptyList(),
+                        skills = skills, traces = emptyList(), eidolons = eidolons,
                         resonance = faction
                     ))
                 }
@@ -115,6 +118,63 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
         }
         
         return result
+    }
+    
+    // ===== Wiki 增强数据解析 =====
+
+    /** 从 wiki 数据解析基础属性 */
+    private fun parseWikiStats(page: JSONObject): BaseStats {
+        val stats = page.optJSONObject("_stats")
+        if (stats != null) {
+            return BaseStats(
+                hp = stats.optDouble("hp_lv80", 0.0),
+                attack = stats.optDouble("atk_lv80", 0.0),
+                defense = stats.optDouble("def_lv80", 0.0),
+                speed = stats.optDouble("spd", 100.0)
+            )
+        }
+        val hp = page.optDouble("80生命值", 0.0)
+        val atk = page.optDouble("80攻击力", 0.0)
+        val def = page.optDouble("80防御力", 0.0)
+        val spd = page.optDouble("速度", 100.0)
+        return BaseStats(hp = hp, attack = atk, defense = def, speed = spd)
+    }
+
+    /** 从 wiki 数据解析星魂 */
+    private fun parseWikiEidolons(page: JSONObject): List<Eidolon> {
+        val list = mutableListOf<Eidolon>()
+        for (i in 1..6) {
+            val nk = "技能_星魂$i"; val dk = "技能_星魂${i}描述"
+            val name = page.optString(nk, "").ifEmpty { page.optString("星魂$i", "") }
+            val desc = page.optString(dk, "").ifEmpty { page.optString("星魂${i}描述", "") }
+            if (name.isNotBlank() || desc.isNotBlank()) {
+                list.add(Eidolon(rank = i, name = name.ifEmpty { "星魂$i" },
+                    description = desc.ifEmpty { name }, effects = emptyList()))
+            }
+        }
+        return list
+    }
+
+    /** 从 wiki 数据解析技能 */
+    private fun parseWikiSkills(page: JSONObject, element: ElementType): List<Skill> {
+        val list = mutableListOf<Skill>()
+        val p = "技能_"
+        data class SkillDef(val key: String, val id: String, val type: SkillType)
+        val defs = listOf(
+            SkillDef("普攻", "basic_atk", SkillType.BASIC),
+            SkillDef("战技", "skill", SkillType.SKILL),
+            SkillDef("终结技", "ultimate", SkillType.ULTIMATE),
+            SkillDef("天赋", "talent", SkillType.TALENT),
+            SkillDef("秘技", "technique", SkillType.TECHNIQUE)
+        )
+        for (d in defs) {
+            val name = page.optString("${p}${d.key}名称", "").ifEmpty { page.optString("${d.key}名称", "") }
+            val desc = page.optString("${p}${d.key}描述", "").ifEmpty { page.optString("${d.key}描述", "") }
+            if (name.isNotBlank()) {
+                list.add(Skill(id = d.id, type = d.type, name = name, description = desc, scaling = emptyList()))
+            }
+        }
+        return list
     }
     
     // ===== 解析辅助 =====
