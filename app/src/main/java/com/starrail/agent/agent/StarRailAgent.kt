@@ -5,6 +5,7 @@ import com.starrail.agent.agent.tool.*
 import com.starrail.agent.agent.report.*
 import com.starrail.agent.agent.llm.*
 import com.starrail.agent.core.datasource.InMemoryGameDataSource
+import com.starrail.agent.core.sync.WikiDataLoader
 import com.starrail.agent.relic.*
 import com.starrail.agent.team.*
 import com.starrail.agent.upgrade.*
@@ -21,11 +22,12 @@ import java.util.UUID
  */
 class StarRailAgent(
     private val llmService: LlmService? = null,
-    private val conversationRepo: ConversationRepository? = null
+    private val conversationRepo: ConversationRepository? = null,
+    private val wikiDataLoader: WikiDataLoader? = null
 ) {
     
-    /** 游戏数据源 */
-    val gameDataSource = InMemoryGameDataSource()
+    /** 游戏数据源（使用 Wiki 数据增强） */
+    val gameDataSource = InMemoryGameDataSource(wikiDataLoader)
     private val intentResolver = IntentResolver()
     private val toolExecutor = ToolExecutor(
         relicScorer = RelicScorer(),

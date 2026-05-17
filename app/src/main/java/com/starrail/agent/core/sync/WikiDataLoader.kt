@@ -182,7 +182,8 @@ class WikiDataLoader(private val dataDir: File? = null) {
         )
     }
 
-    /** 懒加载 + 缓存 */
+    /** 懒加载 + 缓存（公开，返回原始 JSONObject） */
+    fun loadRaw(): JSONObject? = load()
     private fun load(): JSONObject? {
         val now = System.currentTimeMillis()
         if (cachedJson != null && now - lastLoadTime < cacheTtlMs) {

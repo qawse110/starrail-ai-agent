@@ -1,22 +1,48 @@
 package com.starrail.agent.core.datasource
 
 import com.starrail.agent.core.model.*
+import com.starrail.agent.core.sync.WikiDataLoader
 
 /**
  * 基于内存的游戏数据源实现
- * 提供角色、光锥、遗器、敌人等游戏数据
+ * 优先使用 WikiDataLoader 提供的真实数据，回退到硬编码数据
  */
-/**
- * 基于内存的游戏数据源实现
- * 提供角色、光锥、遗器、敌人等游戏数据
- * 注：不直接实现Repository接口以避免JVM签名冲突
- */
-class InMemoryGameDataSource {
+class InMemoryGameDataSource(private val wikiDataLoader: WikiDataLoader? = null) {
     
-    private val characters: List<Character> by lazy { createCharacters() }
-    private val lightCones: List<LightCone> by lazy { createLightCones() }
-    private val relicSets: List<RelicSet> by lazy { createRelicSets() }
+    private val characters: List<Character> by lazy { loadCharacters() }
+    private val lightCones: List<LightCone> by lazy { loadLightCones() }
+    private val relicSets: List<RelicSet> by lazy { loadRelicSets() }
     private val enemies: List<Enemy> by lazy { createEnemies() }
+    
+    /** 从 Wiki 数据加载角色列表 */
+    private fun loadCharacters(): List<Character> {
+        val wiki = wikiDataLoader
+        if (wiki != null && wiki.hasData()) {
+            val wikiChars = com.starrail.agent.core.sync.WikiDataParser.parseCharacterMetadata(wiki.loadRaw())
+            if (wikiChars.isNotEmpty()) {
+                // 合并 wiki 元数据到硬编码战斗数据
+                return com.starrail.agent.core.sync.WikiDataParser.mergeCharacterData(wikiChars, createCharacters())
+            }
+        }
+        return createCharacters()
+    }
+    
+    /** 从 Wiki 数据加载光锥列表 */
+    private fun loadLightCones(): List<LightCone> {
+        val wiki = wikiDataLoader
+        if (wiki != null && wiki.hasData()) {
+            val wikiCones = com.starrail.agent.core.sync.WikiDataParser.parseLightConeMetadata(wiki.loadRaw())
+            if (wikiCones.isNotEmpty()) {
+                return com.starrail.agent.core.sync.WikiDataParser.mergeLightConeData(wikiCones, createLightCones())
+            }
+        }
+        return createLightCones()
+    }
+    
+    /** 从 Wiki 数据加载遗器列表 */
+    private fun loadRelicSets(): List<RelicSet> {
+        return createRelicSets()  // 暂时保持硬编码
+    }
     
     // === Character API ===
     fun getAllCharacters(): List<Character> = characters
