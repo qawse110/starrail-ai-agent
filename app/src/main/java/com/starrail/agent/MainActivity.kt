@@ -125,12 +125,23 @@ class MainActivity : ComponentActivity() {
 
     private fun createAgentFromSettings(): StarRailAgent {
         val settings = llmSettings.load()
-        // 从 assets 加载 Wiki 数据，解析为 JSONObject
+        // 从 assets 或 files 目录加载 Wiki 数据
         val wikiJson = try {
-            val inputStream = assets.open("wiki_data.json")
-            val text = inputStream.bufferedReader().readText().also { inputStream.close() }
-            org.json.JSONObject(text)
+            // 优先从 files 目录读取 (终端同步脚本输出)
+            val filesFile = File(filesDir, "wiki_data.json")
+            if (filesFile.exists() && filesFile.length() > 1000) {
+                org.json.JSONObject(filesFile.readText(Charsets.UTF_8))
+            } else {
+                // 从 assets 读取 (APK 打包)
+                val inputStream = assets.open("wiki_data.json")
+                val text = inputStream.bufferedReader().readText().also { inputStream.close() }
+                // 缓存到 files 目录，下次直接从文件读取
+                filesFile.parentFile?.mkdirs()
+                filesFile.writeText(text, Charsets.UTF_8)
+                org.json.JSONObject(text)
+            }
         } catch (e: Exception) {
+            android.util.Log.w("StarRailAgent", "Wiki data not available: ${e.message}")
             null
         }
         return if (settings.enabled && settings.apiKey.isNotBlank()) {
