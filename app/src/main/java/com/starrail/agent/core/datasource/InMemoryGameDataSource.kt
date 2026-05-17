@@ -173,26 +173,18 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
     private fun parseWikiSkills(page: JSONObject, element: ElementType): List<Skill> {
         val list = mutableListOf<Skill>()
         
-        // Wiki {{角色/技能}} 模板使用统一字段:
-        //   技能_名称  = 技能名称
-        //   技能_描述  = 技能描述  
-        //   技能_类型  = 普攻/战技/终结技/天赋/秘技/欢愉技/忆灵天赋...
-        //   技能_TAG   = 单攻/群攻/扩散...
-        //   技能_削韧值 = 削韧值
-        //   技能_战技点 = 战技点消耗
-        //   技能_消耗能量 = 能量消耗
+        // 格式1（新角色如绯英）: {{角色/技能}} → 技能_名称/技能_描述/技能_类型
         val skillName = page.optString("技能_名称", "")
         val skillDesc = page.optString("技能_描述", "")
         val skillType = page.optString("技能_类型", "")
         
         if (skillName.isNotBlank()) {
-            // 根据类型映射到 SkillType
             val mappedType = when {
                 skillType.contains("普攻") -> SkillType.BASIC
                 skillType.contains("战技") -> SkillType.SKILL
                 skillType.contains("终结") -> SkillType.ULTIMATE
                 skillType.contains("天赋") -> SkillType.TALENT
-                else -> SkillType.TECHNIQUE // 秘技/欢愉技/忆灵天赋等全部当作 TECHNIQUE
+                else -> SkillType.TECHNIQUE
             }
             list.add(Skill(
                 id = when (mappedType) {
@@ -208,20 +200,27 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
             ))
         }
         
-        // 一些老角色可能使用旧的分离字段格式
-        data class OldSkillDef(val wikiKey: String, val id: String, val type: SkillType)
-        val oldDefs = listOf(
-            OldSkillDef("普攻", "basic_atk", SkillType.BASIC),
-            OldSkillDef("战技", "skill", SkillType.SKILL),
-            OldSkillDef("终结技", "ultimate", SkillType.ULTIMATE),
-            OldSkillDef("天赋", "talent", SkillType.TALENT),
-            OldSkillDef("秘技", "technique", SkillType.TECHNIQUE)
+        // 格式2（老角色如希儿）: {{角色图鉴/技能}} → 技能_普攻/技能_战技/技能_终结技/技能_天赋/技能_秘技
+        // 字段: 技能_普攻=强袭, 技能_普攻描述=..., 技能_战技=归刃, 技能_战技描述=...
+        data class SkillDef(val key: String, val id: String, val type: SkillType)
+        val defs = listOf(
+            SkillDef("普攻", "basic_atk", SkillType.BASIC),
+            SkillDef("战技", "skill", SkillType.SKILL),
+            SkillDef("终结技", "ultimate", SkillType.ULTIMATE),
+            SkillDef("天赋", "talent", SkillType.TALENT),
+            SkillDef("秘技", "technique", SkillType.TECHNIQUE)
         )
-        for (d in oldDefs) {
-            val n = page.optString("技能_${d.wikiKey}", "")
-            if (n.isNotBlank() && list.none { it.id == d.id }) {
-                val desc = page.optString("技能_${d.wikiKey}描述", "")
-                list.add(Skill(id = d.id, type = d.type, name = n, description = desc, scaling = emptyList()))
+        for (d in defs) {
+            // 优先使用 "技能_普攻" 格式（老角色 {{角色图鉴/技能}} 模板）
+            var name = page.optString("技能_${d.key}", "").trim()
+            var desc = page.optString("技能_${d.key}描述", "").trim()
+            // 回退到 "普攻" 格式（直接在 {{角色图鉴}} 内的字段）
+            if (name.isEmpty()) {
+                name = page.optString(d.key, "").trim()
+                desc = page.optString("${d.key}描述", "").trim()
+            }
+            if (name.isNotBlank() && list.none { it.id == d.id }) {
+                list.add(Skill(id = d.id, type = d.type, name = name, description = desc, scaling = emptyList()))
             }
         }
         

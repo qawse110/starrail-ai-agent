@@ -111,56 +111,76 @@ def extract_template_fields(wikitext):
     """从 wiki 模板提取字段（增强版：保留全部数据，解析属性数值）"""
     import re
     meta = {}
-    
-    for line in wikitext.split("\n"):
-        line = line.strip()
-        if line.startswith("|") and "=" in line:
-            parts = line[1:].split("=", 1)
-            key = parts[0].strip()
-            value = parts[1].strip() if len(parts) > 1 else ""
-            # 保留原始值，仅做基本清理
-            meta[key] = clean_wiki_text_for_value(value)
-    
-    # 如果没提取到，尝试用正则
-    if not meta:
-        # 从 {{角色图鉴 模板中提取
-        m = re.search(r'\{\{角色图鉴\s*\n(.*?)\n\}\}', wikitext, re.DOTALL)
-        if m:
-            for line in m.group(1).split("\n"):
-                line = line.strip()
-                if line.startswith("|") and "=" in line:
-                    parts = line[1:].split("=", 1)
-                    key = parts[0].strip()
-                    value = parts[1].strip() if len(parts) > 1 else ""
-                    meta[key] = clean_wiki_text_for_value(value)
-    
-    # 提取角色/技能模板（多种变体）
-    skill_templates = [
-        r'\{\{角色/技能\s*\n(.*?)\n\}\}',
-        r'\{\{角色/技能\|(.*?)\}\}',
-        r'\{\{技能\s*\n(.*?)\n\}\}',
-        r'\{\{技能\|(.*?)\}\}',
-    ]
-    for pattern in skill_templates:
-        skill_m = re.search(pattern, wikitext, re.DOTALL)
-        if skill_m:
-            skill_text = skill_m.group(1)
-            skill_meta = {}
-            for line in skill_text.split("\n"):
-                line = line.strip()
-                if line.startswith("|") and "=" in line:
-                    parts = line[1:].split("=", 1)
-                    key = parts[0].strip()
-                    value = parts[1].strip() if len(parts) > 1 else ""
-                    skill_meta["技能_" + key] = clean_wiki_text_for_value(value)
-                elif "=" in line and not line.startswith("{{"):
-                    # 内联格式: key=value
-                    parts = line.split("=", 1)
-                    key = parts[0].strip()
-                    value = parts[1].strip() if len(parts) > 1 else ""
-                    skill_meta["技能_" + key] = clean_wiki_text_for_value(value)
-            meta.update(skill_meta)
-            break  # 找到一个就够
+
+    # 使用递归深度匹配提取 {{角色图鉴 ... }} 完整块
+    # 这样可以正确获取嵌套模板中的字段
+    chara_block = _extract_template_block(wikitext, "角色图鉴")
+    if chara_block:
+        for line in chara_block.split("\n"):
+            line = line.strip()
+            if line.startswith("|") and "=" in line:
+                parts = line[1:].split("=", 1)
+                key = parts[0].strip()
+                value = parts[1].strip() if len(parts) > 1 else ""
+                meta[key] = clean_wiki_text_for_value(value)
+
+    # 提取 {{角色/技能 ... }} 模板（新角色格式）
+    skill_block = _extract_template_block(wikitext, "角色/技能")
+    if skill_block:
+        for line in skill_block.split("\n"):
+            line = line.strip()
+            if line.startswith("|") and "=" in line:
+                parts = line[1:].split("=", 1)
+                key = parts[0].strip()
+                value = parts[1].strip() if len(parts) > 1 else ""
+                meta["技能_" + key] = clean_wiki_text_for_value(value)
+
+    # 提取 {{角色图鉴/技能 ... }} 模板（老角色格式）
+    # 老角色（如希儿）的技能数据在这个子模板中
+    skill_block2 = _extract_template_block(wikitext, "角色图鉴/技能")
+    if skill_block2:
+        for line in skill_block2.split("\n"):
+            line = line.strip()
+            if line.startswith("|") and "=" in line:
+                parts = line[1:].split("=", 1)
+                key = parts[0].strip()
+                value = parts[1].strip() if len(parts) > 1 else ""
+                meta["技能_" + key] = clean_wiki_text_for_value(value)
+
+    # 解析基础属性
+    _parse_stats(meta)
+
+    return meta
+
+
+def _extract_template_block(wikitext, template_name):
+    """从wikitext中提取完整模板块（支持嵌套{{}}）"""
+    import re
+    # 找到 {{template_name 的位置
+    pattern = r'\{\{' + re.escape(template_name) + r'[|\s\n]'
+    m = re.search(pattern, wikitext)
+    if not m:
+        return None
+    start = m.start()
+    # 从起始位置开始，用深度计数找到匹配的 }}
+    depth = 0
+    i = start
+    while i < len(wikitext):
+        if wikitext[i:i+2] == '{{':
+            depth += 1
+            i += 2
+        elif wikitext[i:i+2] == '}}':
+            depth -= 1
+            i += 2
+            if depth == 0:
+                # 提取模板内容（去掉 {{模板名 和 末尾 }}）
+                content = wikitext[start+2+len(template_name):i-2]
+                # 去掉开头的 | 或换行
+                content = content.lstrip('|').lstrip('\n')
+                return content
+        else:
+            i += 1
+    return None
     
     # 解析基础属性
     _parse_stats(meta)
