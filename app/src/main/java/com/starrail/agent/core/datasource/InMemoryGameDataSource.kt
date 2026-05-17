@@ -1,47 +1,148 @@
 package com.starrail.agent.core.datasource
 
 import com.starrail.agent.core.model.*
-import com.starrail.agent.core.sync.WikiDataLoader
+import org.json.JSONObject
 
 /**
  * 基于内存的游戏数据源实现
- * 优先使用 WikiDataLoader 提供的真实数据，回退到硬编码数据
+ * 优先使用 Wiki 数据，回退到硬编码数据
  */
-class InMemoryGameDataSource(private val wikiDataLoader: WikiDataLoader? = null) {
+class InMemoryGameDataSource(private val wikiJsonContent: String? = null) {
     
     private val characters: List<Character> by lazy { loadCharacters() }
     private val lightCones: List<LightCone> by lazy { loadLightCones() }
-    private val relicSets: List<RelicSet> by lazy { loadRelicSets() }
+    private val relicSets: List<RelicSet> by lazy { createRelicSets() }
     private val enemies: List<Enemy> by lazy { createEnemies() }
     
-    /** 从 Wiki 数据加载角色列表 */
+    private fun parseWikiJson(): JSONObject? {
+        val content = wikiJsonContent ?: return null
+        return try { JSONObject(content) } catch (_: Exception) { null }
+    }
+    
     private fun loadCharacters(): List<Character> {
-        val wiki = wikiDataLoader
-        if (wiki != null && wiki.hasData()) {
-            val wikiChars = com.starrail.agent.core.sync.WikiDataParser.parseCharacterMetadata(wiki.loadRaw())
-            if (wikiChars.isNotEmpty()) {
-                // 合并 wiki 元数据到硬编码战斗数据
-                return com.starrail.agent.core.sync.WikiDataParser.mergeCharacterData(wikiChars, createCharacters())
-            }
+        val wiki = parseWikiJson()
+        if (wiki == null) return createCharacters()
+        
+        val wikiChars = wiki.optJSONObject("characters") ?: return createCharacters()
+        if (wikiChars.length() == 0) return createCharacters()
+        
+        val result = mutableListOf<Character>()
+        val hardcoded = createCharacters().associateBy { it.name }
+        val hardcodedNames = hardcoded.keys
+        
+        for (title in wikiChars.keys()) {
+            try {
+                val page = wikiChars.getJSONObject(title)
+                val name = page.optString("名称", title).trim()
+                val rarityStr = page.optString("稀有度", "").trim()
+                val pathStr = page.optString("命途", "").trim()
+                val elemStr = page.optString("元素属性", "").trim()
+                val faction = page.optString("阵营", "").trim()
+                
+                val rarity = if (rarityStr.contains("5")) 5 else 4
+                val path = parsePath(pathStr) ?: continue
+                val element = parseElement(elemStr) ?: continue
+                
+                val hc = hardcoded[name]
+                if (hc != null) {
+                    // 用 wiki 元数据覆盖硬编码，保留战斗数据
+                    result.add(hc.copy(
+                        rarity = rarity, path = path, element = element,
+                        resonance = if (faction.isNotBlank()) faction else hc.resonance
+                    ))
+                } else {
+                    // Wiki独有角色
+                    result.add(Character(
+                        id = "wiki_${name}",
+                        name = name, rarity = rarity, path = path, element = element,
+                        baseStats = BaseStats(0.0, 0.0, 0.0, 0.0),
+                        ascensionStats = emptyMap(),
+                        skills = emptyList(), traces = emptyList(), eidolons = emptyList(),
+                        resonance = faction
+                    ))
+                }
+            } catch (_: Exception) { /* skip malformed */ }
         }
-        return createCharacters()
+        
+        // 追加硬编码有但wiki缺的角色
+        for ((name, hc) in hardcoded) {
+            if (result.none { it.name == name }) result.add(hc)
+        }
+        
+        return result
     }
     
-    /** 从 Wiki 数据加载光锥列表 */
     private fun loadLightCones(): List<LightCone> {
-        val wiki = wikiDataLoader
-        if (wiki != null && wiki.hasData()) {
-            val wikiCones = com.starrail.agent.core.sync.WikiDataParser.parseLightConeMetadata(wiki.loadRaw())
-            if (wikiCones.isNotEmpty()) {
-                return com.starrail.agent.core.sync.WikiDataParser.mergeLightConeData(wikiCones, createLightCones())
-            }
+        val wiki = parseWikiJson()
+        if (wiki == null) return createLightCones()
+        
+        val wikiCones = wiki.optJSONObject("light_cones") ?: return createLightCones()
+        if (wikiCones.length() == 0) return createLightCones()
+        
+        val result = mutableListOf<LightCone>()
+        val hardcoded = createLightCones().associateBy { it.name }
+        val hardcodedNames = hardcoded.keys
+        
+        for (title in wikiCones.keys()) {
+            try {
+                val page = wikiCones.getJSONObject(title)
+                val name = page.optString("名称", title).trim()
+                val rarityStr = page.optString("稀有度", "").trim()
+                val pathStr = page.optString("命途", "").trim()
+                
+                val rarity = when {
+                    rarityStr.contains("5") -> 5
+                    rarityStr.contains("4") -> 4
+                    else -> 3
+                }
+                val path = parsePath(pathStr) ?: continue
+                
+                val hc = hardcoded[name]
+                if (hc != null) {
+                    result.add(hc.copy(rarity = rarity, path = path))
+                } else {
+                    result.add(LightCone(
+                        id = "wiki_lc_${name}",
+                        name = name, rarity = rarity, path = path,
+                        baseStats = BaseStats(0.0, 0.0, 0.0, 0.0),
+                        ascensionStats = emptyMap(),
+                        skill = LightConeSkill("", "", emptyList()),
+                        superimposeLevels = emptyList()
+                    ))
+                }
+            } catch (_: Exception) { /* skip */ }
         }
-        return createLightCones()
+        
+        for ((name, hc) in hardcoded) {
+            if (result.none { it.name == name }) result.add(hc)
+        }
+        
+        return result
     }
     
-    /** 从 Wiki 数据加载遗器列表 */
-    private fun loadRelicSets(): List<RelicSet> {
-        return createRelicSets()  // 暂时保持硬编码
+    // ===== 解析辅助 =====
+    private fun parsePath(str: String): PathType? = when {
+        str.contains("毁灭") -> PathType.毁灭
+        str.contains("巡猎") -> PathType.巡猎
+        str.contains("智识") -> PathType.智识
+        str.contains("同谐") -> PathType.同谐
+        str.contains("虚无") -> PathType.虚无
+        str.contains("存护") -> PathType.存护
+        str.contains("丰饶") -> PathType.丰饶
+        str.contains("记忆") -> PathType.记忆
+        str.contains("欢愉") -> PathType.欢愉
+        else -> null
+    }
+    private fun parseElement(str: String): ElementType? = when {
+        str.contains("火") -> ElementType.火
+        str.contains("冰") -> ElementType.冰
+        str.contains("雷") -> ElementType.雷
+        str.contains("风") -> ElementType.风
+        str.contains("量子") -> ElementType.量子
+        str.contains("虚数") -> ElementType.虚数
+        str.contains("物理") -> ElementType.物理
+        str.contains("幻想") -> ElementType.幻想
+        else -> null
     }
     
     // === Character API ===

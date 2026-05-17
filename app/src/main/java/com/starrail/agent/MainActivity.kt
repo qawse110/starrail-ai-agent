@@ -61,7 +61,6 @@ import com.starrail.agent.agent.ConversationExporter
 import com.starrail.agent.agent.ConversationRepository
 import com.starrail.agent.agent.StarRailAgent
 import com.starrail.agent.agent.llm.LlmConfig
-import com.starrail.agent.core.sync.WikiDataLoader
 import com.starrail.agent.core.sync.WikiDataSyncManager
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -127,11 +126,9 @@ class MainActivity : ComponentActivity() {
     private fun createAgentFromSettings(): StarRailAgent {
         val settings = llmSettings.load()
         // 从 assets 加载 Wiki 数据
-        val wikiLoader = try {
+        val wikiJson = try {
             val inputStream = assets.open("wiki_data.json")
-            val text = inputStream.bufferedReader().readText()
-            inputStream.close()
-            WikiDataLoader(text)
+            inputStream.bufferedReader().readText().also { inputStream.close() }
         } catch (e: Exception) {
             null
         }
@@ -145,9 +142,9 @@ class MainActivity : ComponentActivity() {
                     maxTokens = settings.maxTokens
                 )
             )
-            StarRailAgent(llmService, convRepo, wikiLoader)
+            StarRailAgent(llmService, convRepo, wikiJson)
         } else {
-            StarRailAgent(null, convRepo, wikiLoader)
+            StarRailAgent(null, convRepo, wikiJson)
         }
     }
 
