@@ -315,7 +315,6 @@ class WikiDataSyncManager(private val dataDir: File) {
         val url = URL("$API_BASE?$queryString")
         
         var lastException: Exception? = null
-        // 重试3次
         for (attempt in 1..3) {
             try {
                 val conn = url.openConnection() as HttpURLConnection
@@ -325,23 +324,22 @@ class WikiDataSyncManager(private val dataDir: File) {
                     conn.readTimeout = 30000
                     conn.setRequestProperty("User-Agent", "StarRailAI-Agent/1.0 (Android)")
                     conn.setRequestProperty("Accept", "application/json")
-
+                    
                     val responseCode = conn.responseCode
                     if (responseCode != HttpURLConnection.HTTP_OK) {
                         val errorBody = try { conn.errorStream?.bufferedReader()?.readText() ?: "" } catch (_: Exception) { "" }
-                        throw java.io.IOException("HTTP $responseCode: $errorBody")
+                        throw java.io.IOException("HTTP $responseCode: ${errorBody.take(200)}")
                     }
-
+                    
                     val body = conn.inputStream.bufferedReader().readText()
+                    if (body.isBlank()) throw java.io.IOException("空响应")
                     return JSONObject(body)
                 } finally {
                     conn.disconnect()
                 }
             } catch (e: Exception) {
                 lastException = e
-                if (attempt < 3) {
-                    Thread.sleep(1000L * attempt) // 指数退避
-                }
+                if (attempt < 3) Thread.sleep(1000L * attempt)
             }
         }
         throw lastException ?: java.io.IOException("API请求失败")

@@ -5,17 +5,25 @@ import java.io.File
 
 /**
  * Wiki 数据加载器
- * 读取 WikiDataSyncManager 同步的 wiki_data.json，提供查询接口
- * 可被 ToolExecutor 调用，让 LLM 获取真实 Wiki 数据
+ * 从 assets 或 files 目录加载 wiki_data.json，提供角色/光锥/遗器查询接口
+ * 供 ToolExecutor/LLM 获取真实 Wiki 数据
  */
-class WikiDataLoader(private val dataDir: File) {
+class WikiDataLoader(private val dataDir: File? = null) {
 
-    private var cached: JSONObject? = null
+    private var cachedJson: JSONObject? = null
     private var lastLoadTime = 0L
     private val cacheTtlMs = 300_000L  // 5分钟缓存
+    private var assetJson: String? = null  // assets注入
+
+    /** 用于从 assets 加载的构造 */
+    constructor(assetContent: String) : this(null) {
+        this.assetJson = assetContent
+    }
 
     /** 检查是否有可用数据 */
     fun hasData(): Boolean {
+        if (assetJson != null) return true
+        if (dataDir == null) return false
         val file = File(dataDir, "wiki_data.json")
         return file.exists() && file.length() > 100
     }
@@ -25,6 +33,14 @@ class WikiDataLoader(private val dataDir: File) {
         return try {
             load()?.optLong("sync_time", 0)?.takeIf { it > 0 }
         } catch (_: Exception) { null }
+    }
+
+    /** 获取同步数据大小 */
+    fun getDataSize(): String {
+        if (assetJson != null) return "${assetJson!!.length / 1024}KB"
+        if (dataDir == null) return "无"
+        val file = File(dataDir, "wiki_data.json")
+        return if (file.exists()) "${file.length() / 1024}KB" else "无"
     }
 
     /** 计数统计 */
@@ -169,15 +185,25 @@ class WikiDataLoader(private val dataDir: File) {
     /** 懒加载 + 缓存 */
     private fun load(): JSONObject? {
         val now = System.currentTimeMillis()
-        if (cached != null && now - lastLoadTime < cacheTtlMs) {
-            return cached
+        if (cachedJson != null && now - lastLoadTime < cacheTtlMs) {
+            return cachedJson
         }
+        // 优先从 assetJson 加载
+        if (assetJson != null) {
+            return try {
+                val json = JSONObject(assetJson)
+                cachedJson = json
+                lastLoadTime = now
+                json
+            } catch (_: Exception) { null }
+        }
+        if (dataDir == null) return null
         val file = File(dataDir, "wiki_data.json")
         if (!file.exists()) return null
         return try {
             val text = file.readText(Charsets.UTF_8)
             val json = JSONObject(text)
-            cached = json
+            cachedJson = json
             lastLoadTime = now
             json
         } catch (e: Exception) {
