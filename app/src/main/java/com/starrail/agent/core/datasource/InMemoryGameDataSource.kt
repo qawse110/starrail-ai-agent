@@ -13,7 +13,7 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
     
     private val characters: List<Character> by lazy { loadCharacters() }
     private val lightCones: List<LightCone> by lazy { loadLightCones() }
-    private val relicSets: List<RelicSet> by lazy { createRelicSets() }
+    private val relicSets: List<RelicSet> by lazy { loadRelicSets() }
     private val enemies: List<Enemy> by lazy { createEnemies() }
     
     private fun loadCharacters(): List<Character> {
@@ -131,6 +131,50 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
             if (result.none { it.name == name }) result.add(hc)
         }
         
+        return result
+    }
+    
+    /** 从 wiki 加载遗器数据 */
+    private fun loadRelicSets(): List<RelicSet> {
+        val wiki = wikiJson
+        if (wiki == null) return createRelicSets()
+        
+        val wikiRelics = wiki.optJSONObject("relic_sets") ?: return createRelicSets()
+        if (wikiRelics.length() == 0) return createRelicSets()
+        
+        val result = mutableListOf<RelicSet>()
+        val hardcoded = createRelicSets().associateBy { it.name }
+        var index = 0
+        
+        for (title in wikiRelics.keys()) {
+            try {
+                val page = wikiRelics.getJSONObject(title)
+                val name = page.optString("名称", "").trim().ifEmpty { title }
+                val category = page.optString("类别", "").trim()
+                val type = if (category.contains("位面")) RelicSetType.ORNAMENT else RelicSetType.RELIC
+                val effect2 = page.optString("两件套效果", "").trim()
+                val effect4 = page.optString("四件套效果", "").trim()
+                
+                val hc = hardcoded[name]
+                if (hc != null) {
+                    result.add(hc)
+                } else {
+                    val bonuses = mutableListOf<SetBonus>()
+                    if (effect2.isNotBlank()) bonuses.add(SetBonus(2, listOf(
+                        Effect(EffectType.ATK_UP, "[2件套] $effect2", 0.0, target = EffectTarget.SELF)
+                    )))
+                    if (effect4.isNotBlank()) bonuses.add(SetBonus(4, listOf(
+                        Effect(EffectType.ATK_UP, "[4件套] $effect4", 0.0, target = EffectTarget.SELF)
+                    )))
+                    result.add(RelicSet(id = "wiki_rel_${index++}", name = name,
+                        setBonuses = bonuses, type = type))
+                }
+            } catch (_: Exception) { /* skip */ }
+        }
+        
+        for ((name, hc) in hardcoded) {
+            if (result.none { it.name == name }) result.add(hc)
+        }
         return result
     }
     

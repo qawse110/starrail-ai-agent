@@ -112,17 +112,22 @@ def extract_template_fields(wikitext):
     import re
     meta = {}
 
-    # 使用递归深度匹配提取 {{角色图鉴 ... }} 完整块
-    # 这样可以正确获取嵌套模板中的字段
-    chara_block = _extract_template_block(wikitext, "角色图鉴")
-    if chara_block:
-        for line in chara_block.split("\n"):
-            line = line.strip()
-            if line.startswith("|") and "=" in line:
-                parts = line[1:].split("=", 1)
-                key = parts[0].strip()
-                value = parts[1].strip() if len(parts) > 1 else ""
-                meta[key] = clean_wiki_text_for_value(value)
+    # 尝试提取所有相关模板
+    # 角色: {{角色图鉴 ... }}
+    # 光锥: {{光锥图鉴 ... }}
+    # 遗器: {{遗器套装 ... }}
+    # 通用: 先按模板名顺序尝试，谁先匹配到就用谁
+    for tmpl in ["角色图鉴", "光锥图鉴", "遗器套装"]:
+        block = _extract_template_block(wikitext, tmpl)
+        if block:
+            for line in block.split("\n"):
+                line = line.strip()
+                if line.startswith("|") and "=" in line:
+                    parts = line[1:].split("=", 1)
+                    key = parts[0].strip()
+                    value = parts[1].strip() if len(parts) > 1 else ""
+                    meta[key] = clean_wiki_text_for_value(value)
+            break  # 只取第一个匹配的模板
 
     # 提取 {{角色/技能 ... }} 模板（新角色格式）
     skill_block = _extract_template_block(wikitext, "角色/技能")
