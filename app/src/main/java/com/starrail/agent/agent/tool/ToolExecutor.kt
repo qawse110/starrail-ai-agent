@@ -2,6 +2,7 @@ package com.starrail.agent.agent.tool
 
 import com.starrail.agent.agent.intent.*
 import com.starrail.agent.battle.calculator.*
+import com.starrail.agent.battle.engine.ActionTimeline
 import com.starrail.agent.relic.*
 import com.starrail.agent.team.*
 import com.starrail.agent.upgrade.*
@@ -162,6 +163,12 @@ class ToolExecutor(
         )
         val isWeaknessHit = enemy?.weakness?.contains(element) == true
         
+        // 行动轴：行动值 = 10000 / 速度；首轮150行动值，之后每轮100
+        val characterActionValue = ActionTimeline.actionValue(attackerStats.speed)
+        val enemyActionValue = ActionTimeline.actionValue(enemy?.stats?.speed ?: 100.0)
+        val charActionsFirstCycle = ActionTimeline.actionsInCycles(attackerStats.speed, 1)
+        val charActionsTwoCycles = ActionTimeline.actionsInCycles(attackerStats.speed, 2)
+        
         // 使用 DamageCalculator 计算
         val basicSkill = char?.skills?.firstOrNull { it.type == SkillType.BASIC } 
             ?: Skill("basic", SkillType.BASIC, "普攻", "", listOf(ScalingEntry(StatType.ATK, 1.0)))
@@ -201,6 +208,10 @@ class ToolExecutor(
             "enemy_toughness" to (enemy?.toughness ?: 200),
             "enemy_resistance" to resistance,
             "enemy_location" to (enemy?.location ?: "未知"),
+            "character_action_value" to characterActionValue,
+            "enemy_action_value" to enemyActionValue,
+            "character_actions_first_cycle" to charActionsFirstCycle,
+            "character_actions_2_cycles" to charActionsTwoCycles,
             "summary" to "${char?.name ?: characterId} 对 ${enemy?.name ?: targetEnemy} 的普攻期望约 ${"%.0f".format(expectedDamage)}，战技约 ${"%.0f".format(skillDamage)}，终结技约 ${"%.0f".format(ultDamage)}，预计 ${cycles} 轮击杀"
         )
     }
