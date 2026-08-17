@@ -241,6 +241,52 @@ class ToolExecutorTest {
     }
 
     @Test
+    fun testAnalyzeTeam_calculated() {
+        val result = executor.execute(
+            "analyze_team",
+            mapOf("team_id" to "希儿,布洛妮娅,银狼,白露")
+        )
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        val total = data!!["total_cycle_damage"] as? Number
+        assertNotNull(total)
+        assertTrue("总伤应大于0", total!!.toDouble() > 0)
+        assertNotNull(data["members"])
+    }
+
+    @Test
+    fun testCompareTeams_calculated() {
+        val result = executor.execute(
+            "compare_teams",
+            mapOf(
+                "teams" to listOf("希儿,布洛妮娅,银狼,白露", "镜流,停云,佩拉,白露")
+            )
+        )
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        val rankings = data!!["rankings"] as? List<*>
+        assertNotNull(rankings)
+        assertEquals(2, rankings!!.size)
+        assertNotNull(data["recommended_team"])
+    }
+
+    @Test
+    fun testSuggestTeam_calculated() {
+        val result = executor.execute("suggest_team", mapOf("main_dps" to "希儿"))
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        val suggested = data!!["suggested_team"] as? List<*>
+        assertNotNull(suggested)
+        assertTrue("推荐队伍应包含主C", suggested!!.any { it == "希儿" })
+        val estimated = data["estimated_total_damage"] as? Number
+        assertNotNull(estimated)
+        assertTrue("估算总伤应大于0", estimated!!.toDouble() > 0)
+    }
+
+    @Test
     fun testSimulateBattle_calculated() {
         val result = executor.execute("simulate_battle", mapOf("character_id" to "希儿", "target_enemy" to "可可利亚"))
         assertTrue(result.success)

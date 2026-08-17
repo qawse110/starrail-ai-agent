@@ -444,45 +444,159 @@ class ToolExecutor(
     // === 配队对比工具 ===
     
     private fun executeAnalyzeTeam(parameters: Map<String, Any?>): Map<String, Any> {
-        val teamId = parameters["team_id"] as? String ?: ""
+        val teamSpec = parameters["team_id"] ?: parameters["team"]
+        val team = resolveTeam(teamSpec)
+        if (team.isEmpty()) {
+            return mapOf("error" to "未找到队伍成员，请提供角色名称")
+        }
         
-        // 简化分析结果
+        val model = analyzeTeamModel(team)
+        val strengths = mutableListOf<String>()
+        if (team.any { it.path == PathType.存护 || it.path == PathType.丰饶 }) strengths.add("有生存位保障")
+        if (team.count { it.path == PathType.同谐 } > 0) strengths.add("有同谐辅助")
+        if (team.count { it.path == PathType.虚无 } > 0) strengths.add("有虚无辅助")
+        
+        val weaknesses = mutableListOf<String>()
+        if (team.none { it.path == PathType.存护 || it.path == PathType.丰饶 }) weaknesses.add("缺少生存位")
+        if (team.size < 4) weaknesses.add("队伍人数不足4人")
+        
+        val suggestions = mutableListOf<String>()
+        if (team.none { it.path == PathType.存护 || it.path == PathType.丰饶 }) suggestions.add("建议补充存护或丰饶角色")
+        if (team.count { it.path == PathType.同谐 } == 0) suggestions.add("建议添加同谐辅助提升输出")
+        
         return mapOf(
-            "team_id" to teamId,
-            "synergy_score" to 75.0,
-            "strengths" to listOf("有生存位", "属性覆盖全面"),
-            "weaknesses" to listOf("战技点可能紧张"),
-            "suggestions" to listOf("建议添加同谐角色")
+            "team" to team.map { it.name },
+            "synergy_score" to model["synergy_score"],
+            "total_cycle_damage" to model["total_cycle_damage"],
+            "avg_dps_score" to model["avg_dps_score"],
+            "team_synergy" to model["team_synergy"],
+            "strengths" to strengths,
+            "weaknesses" to weaknesses,
+            "suggestions" to suggestions,
+            "members" to model["members"]
         )
     }
     
     private fun executeCompareTeams(parameters: Map<String, Any?>): Map<String, Any> {
-        @Suppress("UNCHECKED_CAST")
-        val teams = parameters["teams"] as? List<String> ?: emptyList()
+        val rawTeams = parameters["teams"] as? List<*> ?: emptyList<Any?>()
+        if (rawTeams.isEmpty()) {
+            return mapOf("error" to "请提供至少一支队伍")
+        }
         
-        // 简化对比结果
-        val rankingsMap = mutableMapOf<String, Int>()
-        teams.getOrNull(0)?.let { rankingsMap[it] = 1 }
-        teams.getOrNull(1)?.let { rankingsMap[it] = 2 }
+        val teamModels = rawTeams.mapIndexedNotNull { index, spec ->
+            val team = resolveTeam(spec)
+            if (team.isEmpty()) null else index to analyzeTeamModel(team)
+        }
+        if (teamModels.isEmpty()) {
+            return mapOf("error" to "未找到可对比的队伍")
+        }
+        
+        val sorted = teamModels.sortedByDescending { (it.second["total_cycle_damage"] as? Number)?.toDouble() ?: 0.0 }
+        val rankings = sorted.mapIndexed { rank, (_, model) ->
+            mapOf("rank" to (rank + 1), "team" to model["team"])
+        }
+        
         return mapOf(
-            "teams" to teams,
-            "rankings" to rankingsMap,
-            "recommended_team" to (teams.firstOrNull() ?: ""),
-            "comparison" to mapOf("协同评分" to 75.0, "DPS" to 50000.0)
+            "rankings" to rankings,
+            "recommended_team" to sorted.firstOrNull()?.second?.get("team"),
+            "comparison" to sorted.map { it.second },
+            "summary" to buildString {
+                sorted.forEachIndexed { index, (_, model) ->
+                    appendLine("${index + 1}. ${model["team"]}: 总伤 ${"%.0f".format((model["total_cycle_damage"] as? Number)?.toDouble() ?: 0.0)}，协同 ${"%.1f".format((model["synergy_score"] as? Number)?.toDouble() ?: 0.0)}")
+                }
+            }
         )
     }
     
     private fun executeSuggestTeam(parameters: Map<String, Any?>): Map<String, Any> {
-        val targetContent = parameters["target_content"] as? String ?: "混沌"
-        val mainDps = parameters["main_dps"] as? String ?: ""
+        val targetContent = getParam(parameters, "target_content") ?: "混沌"
+        val mainDps = getParam(parameters, "main_dps", "main_dps_name") ?: ""
+        val main = dataSource?.searchCharacters(mainDps)?.firstOrNull()
+        if (main == null) {
+            return mapOf("error" to "未找到主C角色")
+        }
         
-        // 简化推荐
+        val suggested = buildSuggestedTeam(main)
+        val model = analyzeTeamModel(suggested)
         return mapOf(
             "target_content" to targetContent,
-            "main_dps" to mainDps,
-            "suggested_team" to listOf(mainDps, "银狼", "驭空", "白露"),
-            "reasoning" to "推荐该队伍进行${targetContent}"
+            "main_dps" to main.name,
+            "suggested_team" to suggested.map { it.name },
+            "estimated_total_damage" to model["total_cycle_damage"],
+            "synergy_score" to model["synergy_score"],
+            "reasoning" to "基于战斗模型自动配出主C+同谐+虚无+生存位，推荐用于${targetContent}"
         )
+    }
+    
+    /** 将队伍描述解析为角色模板列表 */
+    private fun resolveTeam(teamSpec: Any?): List<Character> {
+        return when (teamSpec) {
+            is List<*> -> teamSpec.flatMap { resolveTeam(it) }.distinctBy { it.id }
+            is String -> teamSpec
+                .split(',', '，', '+', ';', '；')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .mapNotNull { dataSource?.searchCharacters(it)?.firstOrNull() }
+                .distinctBy { it.id }
+            else -> emptyList()
+        }
+    }
+    
+    /** 用战斗模型量化器计算整队指标 */
+    private fun analyzeTeamModel(team: List<Character>): Map<String, Any> {
+        val results = team.map { member ->
+            battleModelQuantifier.quantify(
+                member,
+                team = team.filter { it.id != member.id },
+                enemy = null,
+                cycles = 4
+            )
+        }
+        val totalCycleDamage = results.sumOf { it.cycleDamage }
+        val avgDpsScore = results.map { it.dpsScore }.average()
+        val sustain = team.any { it.path == PathType.存护 || it.path == PathType.丰饶 }
+        val harmony = team.count { it.path == PathType.同谐 }
+        val nihility = team.count { it.path == PathType.虚无 }
+        val synergyScore = (avgDpsScore * 0.7 + (if (sustain) 10.0 else 0.0) + harmony * 5.0 + nihility * 4.0)
+            .coerceIn(0.0, 100.0)
+        
+        val parts = mutableListOf<String>()
+        if (harmony > 0) parts += "${harmony}同谐"
+        if (nihility > 0) parts += "${nihility}虚无"
+        if (sustain) parts += "生存位"
+        
+        return mapOf(
+            "team" to team.map { it.name },
+            "total_cycle_damage" to totalCycleDamage,
+            "avg_dps_score" to avgDpsScore,
+            "synergy_score" to synergyScore,
+            "team_synergy" to (parts.joinToString("+").ifEmpty { "无配队增益" }),
+            "members" to results.map {
+                mapOf(
+                    "name" to it.characterName,
+                    "cycle_damage" to it.cycleDamage,
+                    "dps_score" to it.dpsScore,
+                    "team_synergy" to it.teamSynergyDescription,
+                    "summary" to it.summary
+                )
+            }
+        )
+    }
+    
+    /** 根据主C命途/属性构建推荐队伍 */
+    private fun buildSuggestedTeam(main: Character): List<Character> {
+        val candidates = listOf("布洛妮娅", "停云", "佩拉", "白露")
+        val supports = candidates.mapNotNull { dataSource?.searchCharacters(it)?.firstOrNull() }
+        val harmony = supports.firstOrNull { it.path == PathType.同谐 }
+        val nihility = supports.firstOrNull { it.path == PathType.虚无 }
+        val sustain = supports.firstOrNull { it.path == PathType.存护 || it.path == PathType.丰饶 }
+        
+        val team = mutableListOf(main)
+        listOf(harmony, nihility, sustain)
+            .filterNotNull()
+            .filter { it.id != main.id }
+            .forEach { team.add(it) }
+        return team
     }
     
     // === 数据查询工具（为 LLM 提供的真实数据接口）===
