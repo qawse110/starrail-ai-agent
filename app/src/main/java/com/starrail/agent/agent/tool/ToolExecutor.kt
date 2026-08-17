@@ -333,7 +333,7 @@ class ToolExecutor(
     
     // === 战斗模型量化工具 ===
     
-    private fun executeQuantifyBattleModel(parameters: Map<String, Any?>): Map<String, Any> {
+    private fun executeQuantifyBattleModel(parameters: Map<String, Any?>): Map<String, Any?> {
         val ds = dataSource
         val charNames = when (val raw = parameters["characters"]) {
             is List<*> -> raw.mapNotNull { it?.toString() }
@@ -361,7 +361,7 @@ class ToolExecutor(
             battleModelQuantifier.quantify(character, team, enemy, cycles)
         }.sortedByDescending { it.dpsScore }
         
-        return mapOf(
+        return mapOf<String, Any?>(
             "characters" to results.map {
                 mapOf(
                     "character" to it.characterName,
@@ -443,7 +443,7 @@ class ToolExecutor(
     
     // === 配队对比工具 ===
     
-    private fun executeAnalyzeTeam(parameters: Map<String, Any?>): Map<String, Any> {
+    private fun executeAnalyzeTeam(parameters: Map<String, Any?>): Map<String, Any?> {
         val teamSpec = parameters["team_id"] ?: parameters["team"]
         val team = resolveTeam(teamSpec)
         if (team.isEmpty()) {
@@ -464,7 +464,7 @@ class ToolExecutor(
         if (team.none { it.path == PathType.存护 || it.path == PathType.丰饶 }) suggestions.add("建议补充存护或丰饶角色")
         if (team.count { it.path == PathType.同谐 } == 0) suggestions.add("建议添加同谐辅助提升输出")
         
-        return mapOf(
+        return mapOf<String, Any?>(
             "team" to team.map { it.name },
             "synergy_score" to model["synergy_score"],
             "total_cycle_damage" to model["total_cycle_damage"],
@@ -477,7 +477,7 @@ class ToolExecutor(
         )
     }
     
-    private fun executeCompareTeams(parameters: Map<String, Any?>): Map<String, Any> {
+    private fun executeCompareTeams(parameters: Map<String, Any?>): Map<String, Any?> {
         val rawTeams = parameters["teams"] as? List<*> ?: emptyList<Any?>()
         if (rawTeams.isEmpty()) {
             return mapOf("error" to "请提供至少一支队伍")
@@ -496,7 +496,7 @@ class ToolExecutor(
             mapOf("rank" to (rank + 1), "team" to model["team"])
         }
         
-        return mapOf(
+        return mapOf<String, Any?>(
             "rankings" to rankings,
             "recommended_team" to sorted.firstOrNull()?.second?.get("team"),
             "comparison" to sorted.map { it.second },
@@ -508,7 +508,7 @@ class ToolExecutor(
         )
     }
     
-    private fun executeSuggestTeam(parameters: Map<String, Any?>): Map<String, Any> {
+    private fun executeSuggestTeam(parameters: Map<String, Any?>): Map<String, Any?> {
         val targetContent = getParam(parameters, "target_content") ?: "混沌"
         val mainDps = getParam(parameters, "main_dps", "main_dps_name") ?: ""
         val main = dataSource?.searchCharacters(mainDps)?.firstOrNull()
@@ -518,7 +518,7 @@ class ToolExecutor(
         
         val suggested = buildSuggestedTeam(main)
         val model = analyzeTeamModel(suggested)
-        return mapOf(
+        return mapOf<String, Any?>(
             "target_content" to targetContent,
             "main_dps" to main.name,
             "suggested_team" to suggested.map { it.name },
@@ -543,7 +543,7 @@ class ToolExecutor(
     }
     
     /** 用战斗模型量化器计算整队指标 */
-    private fun analyzeTeamModel(team: List<Character>): Map<String, Any> {
+    private fun analyzeTeamModel(team: List<Character>): Map<String, Any?> {
         val results = team.map { member ->
             battleModelQuantifier.quantify(
                 member,
@@ -565,7 +565,7 @@ class ToolExecutor(
         if (nihility > 0) parts += "${nihility}虚无"
         if (sustain) parts += "生存位"
         
-        return mapOf(
+        return mapOf<String, Any?>(
             "team" to team.map { it.name },
             "total_cycle_damage" to totalCycleDamage,
             "avg_dps_score" to avgDpsScore,
