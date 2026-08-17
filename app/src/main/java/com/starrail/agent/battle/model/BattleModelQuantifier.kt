@@ -17,7 +17,8 @@ data class BattleModelContext(
     val supportResPen: Double = 0.0,
     val harmonyCount: Int = 0,
     val nihilityCount: Int = 0,
-    val sustainPresent: Boolean = false
+    val sustainPresent: Boolean = false,
+    val sameElementCount: Int = 0
 )
 
 data class BattleModelResult(
@@ -31,7 +32,10 @@ data class BattleModelResult(
     val soloCycleDamage: Double,
     val actionsPerCycle: Double,
     val weaknessMatch: Boolean,
+    val resistance: Double,
     val teamBuffMultiplier: Double,
+    val scoreBreakdown: Map<String, Double>,
+    val teamSynergyDescription: String,
     val dpsScore: Double,
     val summary: String
 )
@@ -48,7 +52,7 @@ class BattleModelQuantifier(
         cycles: Int = 4
     ): BattleModelResult {
         val teammates = team.filter { it.id != character.id && it.name != character.name }
-        val context = buildTeamContext(teammates)
+        val context = buildTeamContext(teammates, character.element)
         val soloCycleDamage = estimateCycleDamage(character, BattleModelContext(), enemy)
         val teamCycleDamage = estimateCycleDamage(character, context, enemy)
         val attackerStats = buildAttackerStats(character, context)
@@ -56,14 +60,19 @@ class BattleModelQuantifier(
         val safeCycles = cycles.coerceAtLeast(1)
         val actionsPerCycle = ActionTimeline.actionsInCycles(speed, safeCycles).toDouble() / safeCycles
         val weaknessMatch = enemy?.weakness?.contains(character.element) == true
+        val resistance = enemy?.resistance?.get(character.element) ?: 0.2
         val teamBuffMultiplier = if (soloCycleDamage > 0.0) teamCycleDamage / soloCycleDamage else 1.0
-        val score = computeScore(teamCycleDamage, actionsPerCycle, weaknessMatch, teamBuffMultiplier)
+        val scoreBreakdown = computeScoreBreakdown(
+            teamCycleDamage, actionsPerCycle, weaknessMatch, teamBuffMultiplier, context.sustainPresent
+        )
+        val score = scoreBreakdown.values.sum().coerceIn(0.0, 100.0)
+        val teamSynergyDescription = buildTeamSynergyDescription(context)
 
         val summary = buildString {
             append("${character.name}（${character.element.displayName}/${character.path.displayName}）")
             append("标准循环期望 ${"%.0f".format(teamCycleDamage)}")
             if (teammates.isNotEmpty()) {
-                append("，配队增益×${"%.2f".format(teamBuffMultiplier)}")
+                append("，配队[${teamSynergyDescription}]×${"%.2f".format(teamBuffMultiplier)}")
             }
             if (enemy != null) {
                 append(if (weaknessMatch) "，克制目标弱点" else "，未命中目标弱点")
@@ -82,7 +91,10 @@ class BattleModelQuantifier(
             soloCycleDamage = soloCycleDamage,
             actionsPerCycle = actionsPerCycle,
             weaknessMatch = weaknessMatch,
+            resistance = resistance,
             teamBuffMultiplier = teamBuffMultiplier,
+            scoreBreakdown = scoreBreakdown,
+            teamSynergyDescription = teamSynergyDescription,
             dpsScore = score,
             summary = summary
         )
@@ -126,7 +138,7 @@ class BattleModelQuantifier(
             speed = speed,
             critRate = (character.baseStats.critRate + 0.60).coerceAtMost(1.0),
             critDmg = character.baseStats.critDmg + 1.0,
-            elementalDmgBonus = 0.389,
+            elementalDmgBonus = 0.389 + 0.03 * context.sameElementCount,
             dmgBonus = context.supportDmgBonus,
             defPenetration = context.supportDefPen,
             resPenetration = context.supportResPen,
@@ -143,10 +155,11 @@ class BattleModelQuantifier(
         )
     }
 
-    private fun buildTeamContext(team: List<Character>): BattleModelContext {
+    private fun buildTeamContext(team: List<Character>, element: ElementType): BattleModelContext {
         val harmony = team.count { it.path == PathType.同谐 }
         val nihility = team.count { it.path == PathType.虚无 }
         val sustain = team.any { it.path == PathType.存护 || it.path == PathType.丰饶 }
+        val sameElementCount = team.count { it.element == element }
         return BattleModelContext(
             supportAtkBonus = 0.18 * harmony,
             supportDmgBonus = 0.12 * harmony,
@@ -154,20 +167,38 @@ class BattleModelQuantifier(
             supportResPen = 0.10 * nihility,
             harmonyCount = harmony,
             nihilityCount = nihility,
-            sustainPresent = sustain
+            sustainPresent = sustain,
+            sameElementCount = sameElementCount
         )
     }
 
-    private fun computeScore(
+    private fun computeScoreBreakdown(
         teamCycleDamage: Double,
         actionsPerCycle: Double,
         weaknessMatch: Boolean,
-        teamBuffMultiplier: Double
-    ): Double {
-        val damageScore = (teamCycleDamage / 500000.0 * 100.0).coerceIn(0.0, 70.0)
+        teamBuffMultiplier: Double,
+        sustainPresent: Boolean
+    ): Map<String, Double> {
+        val damageScore = (teamCycleDamage / 500000.0 * 65.0).coerceIn(0.0, 65.0)
         val actionScore = (actionsPerCycle.coerceAtMost(4.0) / 4.0 * 15.0)
         val weaknessScore = if (weaknessMatch) 10.0 else 0.0
         val teamScore = ((teamBuffMultiplier - 1.0).coerceIn(0.0, 0.5) / 0.5 * 5.0)
-        return (damageScore + actionScore + weaknessScore + teamScore).coerceIn(0.0, 100.0)
+        val sustainScore = if (sustainPresent) 5.0 else 0.0
+        return linkedMapOf(
+            "damage" to damageScore,
+            "action" to actionScore,
+            "weakness" to weaknessScore,
+            "team_buff" to teamScore,
+            "sustain" to sustainScore
+        )
+    }
+
+    private fun buildTeamSynergyDescription(context: BattleModelContext): String {
+        val parts = mutableListOf<String>()
+        if (context.harmonyCount > 0) parts += "${context.harmonyCount}同谐"
+        if (context.nihilityCount > 0) parts += "${context.nihilityCount}虚无"
+        if (context.sameElementCount > 0) parts += "${context.sameElementCount}同属性"
+        if (context.sustainPresent) parts += "生存位"
+        return if (parts.isEmpty()) "无配队增益" else parts.joinToString("+")
     }
 }

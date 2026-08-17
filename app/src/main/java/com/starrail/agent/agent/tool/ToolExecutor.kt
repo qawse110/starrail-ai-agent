@@ -373,7 +373,10 @@ class ToolExecutor(
                     "solo_cycle_damage" to it.soloCycleDamage,
                     "actions_per_cycle" to it.actionsPerCycle,
                     "weakness_match" to it.weaknessMatch,
+                    "resistance" to it.resistance,
                     "team_buff_multiplier" to it.teamBuffMultiplier,
+                    "score_breakdown" to it.scoreBreakdown,
+                    "team_synergy" to it.teamSynergyDescription,
                     "dps_score" to it.dpsScore,
                     "summary" to it.summary
                 )
