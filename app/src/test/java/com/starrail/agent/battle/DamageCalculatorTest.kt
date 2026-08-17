@@ -54,8 +54,8 @@ class DamageCalculatorTest {
             context = DamageContext(isWeaknessBroken = false, skillTypeBonus = 0.0)
         )
         
-        // 期望伤害 = 3000 * 1 * 1 * (80*2+2000)/(80*2+2000+800) * 1 * 1 * (1 + 0.05*0.50)
-        val expectedDefenseZone = (80 * 2 + 2000.0) / (80 * 2 + 2000.0 + 800.0)
+        // 期望伤害 = 3000 * 1 * 1 * (80*10+200)/(80*10+200+800) * 1 * 1 * 1 * (1 + 0.05*0.50)
+        val expectedDefenseZone = (80 * 10 + 200.0) / (80 * 10 + 200.0 + 800.0)
         val expectedRaw = 3000.0 * expectedDefenseZone
         val expectedDamage = expectedRaw * (1 + 0.05 * 0.50)
         
@@ -200,7 +200,7 @@ class DamageCalculatorTest {
     
     /**
      * 测试：韧性击破状态增伤
-     * 击破状态下敌人受到1.5倍伤害
+     * 击破状态下敌人受到约1.1倍伤害
      */
     @Test
     fun testWeaknessBreakBonus() {
@@ -242,6 +242,6 @@ class DamageCalculatorTest {
             context = DamageContext(isWeaknessBroken = false)
         )
         
-        assertEquals("击破状态应提升50%伤害", normalResult * 1.5, brokenResult, 0.01)
+        assertEquals("击破状态应提升约10%伤害", normalResult * 1.1, brokenResult, 0.01)
     }
 }

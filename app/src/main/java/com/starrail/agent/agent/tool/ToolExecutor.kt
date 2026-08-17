@@ -135,6 +135,7 @@ class ToolExecutor(
         // 查找角色和敌人
         val char = ds?.searchCharacters(characterId)?.firstOrNull()
         val enemy = ds?.searchEnemies(targetEnemy)?.firstOrNull()
+        val element = char?.element ?: ElementType.物理
         
         // 构建攻击者属性（基础属性 + 装备加成）
         val baseAtk = char?.baseStats?.attack ?: 700.0
@@ -148,19 +149,23 @@ class ToolExecutor(
             maxHp = baseHp * 3.0,
             speed = baseSpd + 20,  // 副词条补正
             critRate = 0.65,
-            critDmg = 1.50
+            critDmg = 1.50,
+            elementalDmgBonus = 0.389
         )
         
-        // 构建敌人防御属性
+        // 构建敌人防御属性（使用角色对应元素的抗性，不再取平均值）
+        val resistance = enemy?.resistance?.get(element) ?: 0.2
         val defenderStats = EnemyDefensiveStats(
             defense = enemy?.stats?.defense ?: 800.0,
-            resistance = enemy?.resistance?.values?.average()?.takeIf { it > 0 } ?: 0.2,
+            resistance = resistance,
             toughness = enemy?.toughness ?: 200
         )
+        val isWeaknessHit = enemy?.weakness?.contains(element) == true
         
         // 使用 DamageCalculator 计算
         val basicSkill = char?.skills?.firstOrNull { it.type == SkillType.BASIC } 
             ?: Skill("basic", SkillType.BASIC, "普攻", "", listOf(ScalingEntry(StatType.ATK, 1.0)))
+        val skillSkill = char?.skills?.firstOrNull { it.type == SkillType.SKILL }
         val ultSkill = char?.skills?.firstOrNull { it.type == SkillType.ULTIMATE }
             ?: Skill("ult", SkillType.ULTIMATE, "终结技", "", listOf(ScalingEntry(StatType.ATK, 4.0)))
         
@@ -168,26 +173,35 @@ class ToolExecutor(
         val expectedDamage = damageCalculator.calculateExpectedDamage(
             attackerStats, defenderStats, basicSkill, context
         )
+        val skillDamage = if (skillSkill != null) {
+            damageCalculator.calculateExpectedDamage(attackerStats, defenderStats, skillSkill, context)
+        } else {
+            expectedDamage * 1.5  // 无战技数据时的粗估
+        }
         val ultDamage = damageCalculator.calculateExpectedDamage(
             attackerStats, defenderStats, ultSkill, context
         )
         
-        // 估算击杀轮数
+        // 估算击杀轮数（标准循环 E+A+Q）
         val enemyHp = enemy?.stats?.hp ?: 40000.0
-        val totalCycleDmg = expectedDamage * 2 + ultDamage * 1  // 2普攻+1终结技每轮
+        val totalCycleDmg = expectedDamage + skillDamage + ultDamage
         val cycles = if (totalCycleDmg > 0) kotlin.math.ceil(enemyHp / totalCycleDmg).toInt().coerceAtLeast(1) else 3
         
         return mapOf(
             "character" to (char?.name ?: characterId),
             "target" to (enemy?.name ?: targetEnemy),
+            "element" to element.displayName,
+            "is_weakness_hit" to isWeaknessHit,
             "character_base_atk" to baseAtk,
             "estimated_basic_damage" to expectedDamage,
+            "estimated_skill_damage" to skillDamage,
             "estimated_ult_damage" to ultDamage,
             "estimated_cycles" to cycles,
             "enemy_hp" to enemyHp,
             "enemy_toughness" to (enemy?.toughness ?: 200),
+            "enemy_resistance" to resistance,
             "enemy_location" to (enemy?.location ?: "未知"),
-            "summary" to "${char?.name ?: characterId} 对 ${enemy?.name ?: targetEnemy} 的普攻期望伤害约 ${"%.0f".format(expectedDamage)}，终结技约 ${"%.0f".format(ultDamage)}，预计 ${cycles} 轮击杀"
+            "summary" to "${char?.name ?: characterId} 对 ${enemy?.name ?: targetEnemy} 的普攻期望约 ${"%.0f".format(expectedDamage)}，战技约 ${"%.0f".format(skillDamage)}，终结技约 ${"%.0f".format(ultDamage)}，预计 ${cycles} 轮击杀"
         )
     }
     
@@ -198,6 +212,7 @@ class ToolExecutor(
         
         val char = ds?.searchCharacters(characterId)?.firstOrNull()
         val enemy = ds?.searchEnemies(enemyName)?.firstOrNull()
+        val element = char?.element ?: ElementType.物理
         
         // 使用角色真实数据构建战斗属性
         val baseAtk = char?.baseStats?.attack ?: 700.0
@@ -218,11 +233,13 @@ class ToolExecutor(
             dmgBonus = 0.0
         )
         
+        val resistance = enemy?.resistance?.get(element) ?: 0.2
         val defenderStats = EnemyDefensiveStats(
             defense = enemy?.stats?.defense ?: 800.0,
-            resistance = enemy?.resistance?.values?.average()?.takeIf { it > 0 } ?: 0.2,
+            resistance = resistance,
             toughness = enemy?.toughness ?: 200
         )
+        val isWeaknessHit = enemy?.weakness?.contains(element) == true
         
         // 计算全部技能伤害+乘区分解
         val context = DamageContext(critRoll = 0.5)
@@ -240,6 +257,8 @@ class ToolExecutor(
                 "bonus_zone" to result.breakdown.damageBonusZone,
                 "defense_zone" to result.breakdown.defenseZone,
                 "resistance_zone" to result.breakdown.resistanceZone,
+                "weakness_zone" to result.breakdown.weaknessZone,
+                "vulnerability_zone" to result.breakdown.vulnerabilityZone,
                 "crit_zone" to result.breakdown.critZone,
                 "expected_damage" to result.expectedDamage,
                 "crit_damage" to result.critDamage
@@ -265,6 +284,8 @@ class ToolExecutor(
         return mapOf(
             "character" to (char?.name ?: characterId),
             "target" to (enemy?.name ?: enemyName),
+            "element" to element.displayName,
+            "is_weakness_hit" to isWeaknessHit,
             "attacker_stats" to mapOf(
                 "attack" to attackerStats.attack,
                 "crit_rate" to "${"%.1f".format(attackerStats.critRate * 100)}%",
@@ -275,7 +296,8 @@ class ToolExecutor(
                 "defense" to defenderStats.defense,
                 "resistance" to "${"%.0f".format(defenderStats.resistance * 100)}%",
                 "toughness" to defenderStats.toughness,
-                "estimated_hp" to enemyHp
+                "estimated_hp" to enemyHp,
+                "is_weakness_hit" to isWeaknessHit
             ),
             "damage_results" to results,
             "cycle_damage" to mapOf(
@@ -288,7 +310,7 @@ class ToolExecutor(
             "summary" to buildString {
                 appendLine("${char?.name ?: characterId} 对 ${enemy?.name ?: enemyName} 的技能伤害：")
                 for (r in results) {
-                    appendLine("${r["type"]}·${r["skill"]}: 期望 ${"%.0f".format(r["expected_damage"])} | 倍率区×${"%.2f".format(r["multiplier_zone"])} 增伤区×${"%.2f".format(r["bonus_zone"])} 防御区×${"%.2f".format(r["defense_zone"])} 抗性区×${"%.2f".format(r["resistance_zone"])}")
+                    appendLine("${r["type"]}·${r["skill"]}: 期望 ${"%.0f".format(r["expected_damage"])} | 倍率区×${"%.2f".format(r["multiplier_zone"])} 增伤区×${"%.2f".format(r["bonus_zone"])} 防御区×${"%.2f".format(r["defense_zone"])} 抗性区×${"%.2f".format(r["resistance_zone"])} 破韧区×${"%.2f".format(r["weakness_zone"])}")
                 }
                 appendLine("标准循环(E+Q+A): 总伤 ${"%.0f".format(cycleDmg)}，约 ${cyclesToKill} 轮击杀")
             }

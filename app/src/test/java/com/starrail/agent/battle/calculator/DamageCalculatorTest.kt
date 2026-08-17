@@ -6,7 +6,7 @@ import org.junit.Test
 
 /**
  * 伤害计算器单元测试
- * 验证7乘区伤害公式的正确性
+ * 验证8乘区伤害公式的正确性
  */
 class DamageCalculatorTest {
 
@@ -60,14 +60,14 @@ class DamageCalculatorTest {
 
     @Test
     fun testDefenseZone_knownValue() {
-        // 防御区 = (80*2 + 2000) / (80*2 + 2000 + 1200)
-        //       = 2160 / (2160 + 1200) = 2160 / 3360 ≈ 0.6429
+        // 防御区 = (80*10 + 200) / (80*10 + 200 + 1200)
+        //       = 1000 / (1000 + 1200) = 1000 / 2200 ≈ 0.4545
         val result = calculator.calculateDamage(
             standardAttacker, standardDefender, basicSkill,
             DamageContext()
         )
         
-        assertEquals("防御区", 2160.0 / 3360.0, result.breakdown.defenseZone, 0.001)
+        assertEquals("防御区", 1000.0 / 2200.0, result.breakdown.defenseZone, 0.001)
     }
 
     @Test
@@ -97,12 +97,12 @@ class DamageCalculatorTest {
         )
         assertEquals("未破韧", 1.0, resultUnbroken.breakdown.weaknessZone, 0.001)
         
-        // 已破韧
+        // 已破韧（敌人受到伤害提升约10%）
         val resultBroken = calculator.calculateDamage(
             standardAttacker, standardDefender, basicSkill,
             DamageContext(isWeaknessBroken = true)
         )
-        assertEquals("已破韧", 1.5, resultBroken.breakdown.weaknessZone, 0.001)
+        assertEquals("已破韧", 1.1, resultBroken.breakdown.weaknessZone, 0.001)
     }
 
     @Test
@@ -135,9 +135,9 @@ class DamageCalculatorTest {
         // 手动计算期望
         val baseDmg = 2600.0 * 1.0  // 基础伤害
         val dmgBonus = 1.0 + 0.388  // 增伤区
-        val defZone = 2160.0 / 3360.0
+        val defZone = 1000.0 / 2200.0
         val resZone = 1.0 - 0.20
-        val rawDmg = baseDmg * 1.0 * dmgBonus * defZone * resZone * 1.0
+        val rawDmg = baseDmg * 1.0 * dmgBonus * defZone * resZone * 1.0 * 1.0
         val expectedManual = rawDmg * (1 + 0.75 * 1.50)
         
         assertEquals("期望伤害", expectedManual, expected, 1.0)
@@ -157,6 +157,45 @@ class DamageCalculatorTest {
         
         // 基础伤害 = HP × 倍率 = 8000 × 1.5 = 12000
         assertEquals("HP倍率基础伤害", 12000.0, result.breakdown.baseDamage, 1.0)
+    }
+
+    @Test
+    fun testMultiScaling_baseDamage() {
+        // 混合倍率：ATK × 1.0 + HP × 0.06，应分别乘后求和，而不是只取一个属性
+        val mixedSkill = Skill(
+            "mixed", SkillType.SKILL, "混合倍率", "测试",
+            scaling = listOf(
+                ScalingEntry(StatType.ATK, 1.0),
+                ScalingEntry(StatType.HP, 0.06)
+            )
+        )
+        val attacker = standardAttacker.copy(attack = 2000.0, maxHp = 50000.0)
+        val result = calculator.calculateDamage(
+            attacker, standardDefender, mixedSkill, DamageContext(critRoll = 0.99)
+        )
+        
+        val expectedBase = 2000.0 * 1.0 + 50000.0 * 0.06
+        assertEquals("混合倍率基础伤害", expectedBase, result.breakdown.baseDamage, 1.0)
+        assertEquals("倍率区应为1.0", 1.0, result.breakdown.multiplierZone, 0.001)
+    }
+    
+    @Test
+    fun testVulnerabilityZone() {
+        // 敌人易伤 30% 时，易伤区 = 1.3
+        val vulnerableDefender = standardDefender.copy(vulnerability = 0.3)
+        val result = calculator.calculateDamage(
+            standardAttacker, vulnerableDefender, basicSkill, DamageContext()
+        )
+        assertEquals("易伤区", 1.3, result.breakdown.vulnerabilityZone, 0.001)
+        
+        // 易伤应提升期望伤害
+        val normal = calculator.calculateExpectedDamage(
+            standardAttacker, standardDefender, basicSkill, DamageContext()
+        )
+        val vulnerable = calculator.calculateExpectedDamage(
+            standardAttacker, vulnerableDefender, basicSkill, DamageContext()
+        )
+        assertEquals("易伤提升30%", normal * 1.3, vulnerable, 1.0)
     }
 
     @Test
@@ -214,6 +253,7 @@ class DamageCalculatorTest {
                            result.breakdown.defenseZone *
                            result.breakdown.resistanceZone *
                            result.breakdown.weaknessZone *
+                           result.breakdown.vulnerabilityZone *
                            result.breakdown.critZone
         
         assertEquals("总乘区乘积", expectedMult, totalMult, 0.001)

@@ -2,7 +2,6 @@ package com.starrail.agent.battle.calculator
 
 import com.starrail.agent.core.model.*
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.random.Random
 
 /**
@@ -30,11 +29,12 @@ class DamageCalculator {
         val defenseZone = calculateDefenseZone(attacker.level, defender.defense, attacker.defPenetration)
         val resistanceZone = calculateResistanceZone(defender.resistance, attacker.resPenetration)
         val weaknessZone = calculateWeaknessZone(context.isWeaknessBroken)
+        val vulnerabilityZone = calculateVulnerabilityZone(defender.vulnerability)
         val critZone = calculateCritZone(attacker.critRate, attacker.critDmg, context.critRoll)
         
         // 3. 计算最终伤害
         val rawDamage = baseDamage * multiplierZone * damageBonusZone * defenseZone * 
-                        resistanceZone * weaknessZone
+                        resistanceZone * weaknessZone * vulnerabilityZone
         val finalDamage = rawDamage * critZone
         
         return DamageResult(
@@ -49,29 +49,28 @@ class DamageCalculator {
                 defenseZone = defenseZone,
                 resistanceZone = resistanceZone,
                 weaknessZone = weaknessZone,
+                vulnerabilityZone = vulnerabilityZone,
                 critZone = critZone
             )
         )
     }
     
-    /** 计算基础伤害（攻击力 × 技能倍率） */
+    /** 计算基础伤害（按每个倍率条目分别取对应属性求和） */
     private fun calculateBaseDamage(attacker: CombatStats, skill: Skill): Double {
-        var baseStat = when {
-            // 根据技能使用的属性类型选择基础属性
-            skill.scaling.any { it.stat == StatType.ATK } -> attacker.attack
-            skill.scaling.any { it.stat == StatType.HP } -> attacker.maxHp
-            skill.scaling.any { it.stat == StatType.DEF } -> attacker.defense
-            else -> attacker.attack
+        return skill.scaling.sumOf { scaling ->
+            val statValue = when (scaling.stat) {
+                StatType.ATK -> attacker.attack
+                StatType.HP -> attacker.maxHp
+                StatType.DEF -> attacker.defense
+                else -> 0.0
+            }
+            statValue * scaling.multiplier
         }
-        
-        val multiplier = skill.scaling.sumOf { it.multiplier }
-        
-        return baseStat * multiplier
     }
     
-    /** 计算伤害倍率区 */
+    /** 计算伤害倍率区（基础伤害已含倍率，因此该区固定为 1.0） */
     private fun calculateMultiplierZone(skill: Skill): Double {
-        return skill.scaling.size.coerceAtLeast(1).toDouble()
+        return if (skill.scaling.isEmpty()) 0.0 else 1.0
     }
     
     /** 计算增伤区 */
@@ -99,8 +98,9 @@ class DamageCalculator {
         defenderDefense: Double,
         defPenetration: Double
     ): Double {
-        // 防御公式：(角色等级*2 + 2000) / (角色等级*2 + 2000 + 敌人防御 × (1 - 防御穿透))
-        val levelFactor = attackerLevel * 2 + 2000
+        // 防御公式：(角色等级*10 + 200) / (角色等级*10 + 200 + 敌人防御 × (1 - 防御穿透))
+        // 参考：敌人防御 = 200 + 敌人等级*10；防御区 = 攻击方等级*10 + 200 / (攻击方等级*10 + 200 + 敌人防御)
+        val levelFactor = attackerLevel * 10 + 200
         val effectiveDefense = defenderDefense * (1 - defPenetration)
         
         return levelFactor / (levelFactor + effectiveDefense)
@@ -117,7 +117,13 @@ class DamageCalculator {
     
     /** 计算弱点区（韧性已破） */
     private fun calculateWeaknessZone(isWeaknessBroken: Boolean): Double {
-        return if (isWeaknessBroken) 1.5 else 1.0
+        // 破韧后敌人受到伤害提升约 10%（部分来源为 11%）
+        return if (isWeaknessBroken) 1.1 else 1.0
+    }
+    
+    /** 计算易伤区（敌人受到伤害提高的 debuff） */
+    private fun calculateVulnerabilityZone(vulnerability: Double): Double {
+        return max(0.0, 1.0 + vulnerability)
     }
     
     /** 计算暴击区 */
@@ -146,9 +152,10 @@ class DamageCalculator {
         val defenseZone = calculateDefenseZone(attacker.level, defender.defense, attacker.defPenetration)
         val resistanceZone = calculateResistanceZone(defender.resistance, attacker.resPenetration)
         val weaknessZone = calculateWeaknessZone(context.isWeaknessBroken)
+        val vulnerabilityZone = calculateVulnerabilityZone(defender.vulnerability)
         
         val rawDamage = baseDamage * multiplierZone * damageBonusZone * defenseZone * 
-                        resistanceZone * weaknessZone
+                        resistanceZone * weaknessZone * vulnerabilityZone
         
         // 期望伤害 = 未暴击伤害 × (1 + 暴击率 × 暴击伤害)
         return rawDamage * (1 + attacker.critRate * attacker.critDmg)
@@ -209,7 +216,8 @@ data class CombatStats(
 data class EnemyDefensiveStats(
     val defense: Double,
     val resistance: Double,
-    val toughness: Int
+    val toughness: Int,
+    val vulnerability: Double = 0.0  // 易伤（受到伤害提高）
 )
 
 /** 伤害计算上下文 */
@@ -236,11 +244,12 @@ data class DamageBreakdown(
     val defenseZone: Double,
     val resistanceZone: Double,
     val weaknessZone: Double,
+    val vulnerabilityZone: Double,
     val critZone: Double
 ) {
     fun getTotalMultiplier(): Double {
         return multiplierZone * damageBonusZone * defenseZone * 
-               resistanceZone * weaknessZone * critZone
+               resistanceZone * weaknessZone * vulnerabilityZone * critZone
     }
 }
 
