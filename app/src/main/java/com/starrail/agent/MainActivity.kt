@@ -71,7 +71,6 @@ import com.starrail.agent.settings.LlmProvider
 import com.starrail.agent.settings.LlmSettings
 import com.starrail.agent.settings.LlmSettingsData
 import com.starrail.agent.core.util.MarkdownParser
-import kotlinx.coroutines.launch
 import java.io.File
 
 // ============================================================

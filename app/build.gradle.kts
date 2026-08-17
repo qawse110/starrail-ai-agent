@@ -44,11 +44,18 @@ android {
     }
 }
 
-// Force use of ARM64 binaries for AAPT2 in Proot environment
-configurations.all {
-    resolutionStrategy.eachDependency {
-        if (requested.group == "com.android.tools.build" && requested.name == "aapt2") {
-            useTarget("com.android.tools.build:aapt2:${'$'}{requested.version}:linux-aarch64")
+// Only use ARM64 AAPT2 binaries in Proot/ARM64 environments, so normal desktop builds
+// (Windows/macOS/x86 Linux) can resolve the platform-appropriate AAPT2 automatically.
+val isArm64Linux = System.getProperty("os.name").lowercase().contains("linux") &&
+    System.getProperty("os.arch").lowercase().contains("aarch64")
+val forceArm64Aapt2 = System.getenv("FORCE_AAPT2_ARM64") == "1"
+
+if (isArm64Linux || forceArm64Aapt2) {
+    configurations.all {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "com.android.tools.build" && requested.name == "aapt2") {
+                useTarget("com.android.tools.build:aapt2:${'$'}{requested.version}:linux-aarch64")
+            }
         }
     }
 }

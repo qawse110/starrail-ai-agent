@@ -2,7 +2,7 @@
 """检查遗器Wiki数据格式"""
 import json
 
-with open("app/src/main/assets/wiki_data.json") as f:
+with open("app/src/main/assets/wiki_data.json", encoding="utf-8") as f:
     data = json.load(f)
 
 relics = data.get("relic_sets", {})

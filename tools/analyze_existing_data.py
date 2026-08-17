@@ -2,7 +2,7 @@
 """分析现有wiki_data.json中角色的技能/数据字段"""
 import json
 
-with open("app/src/main/assets/wiki_data.json") as f:
+with open("app/src/main/assets/wiki_data.json", encoding="utf-8") as f:
     data = json.load(f)
 
 chars = data.get("characters", {})

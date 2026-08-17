@@ -25,7 +25,7 @@
 app/src/main/java/com/starrail/agent/
 ├── core/
 │   ├── model/              # 领域模型（角色/光锥/遗器/敌人等）
-│   ├── datasource/         # 40名角色 + 40光锥 + 42遗器套 + 25敌人 内置数据
+│   ├── datasource/         # 96名角色 + 161光锥 + 56遗器套 + 25敌人（Wiki 数据）
 │   ├── util/               # MarkdownParser（独立可测试的解析器）
 │   └── json/               # JSON 解析/序列化
 ├── player/
@@ -40,7 +40,7 @@ app/src/main/java/com/starrail/agent/
 │   ├── llm/                # LLM 服务（OpenAI API + DSML解析器）
 │   │   ├── LlmService.kt   # LLM 接口抽象
 │   │   └── OpenAiLlmService.kt  # OpenAI/DeepSeek 实现
-│   ├── tool/               # 17个工具执行器（含按命途推荐的遗器配装）
+│   ├── tool/               # 18个工具执行器（含按命途推荐的遗器配装）
 │   ├── report/             # 报告生成器（6种报告模板）
 │   └── StarRailAgent.kt    # Agent 编排器（LLM + 规则双模式）
 ├── settings/               # LLM 配置持久化（SharedPreferences）
@@ -68,7 +68,7 @@ LLM 模式（默认）                   规则模式（回退）
 # 编译 APK
 ./gradlew :app:assembleDebug
 
-# 运行单元测试（126项）
+# 运行单元测试（176项）
 ./gradlew :app:testDebugUnitTest
 ```
 
@@ -84,12 +84,12 @@ LLM 模式（默认）                   规则模式（回退）
 **推荐配置：**
 - **DeepSeek**: `https://api.deepseek.com` / `deepseek-chat`
 - **OpenAI**: `https://api.openai.com` / `gpt-4o-mini`
-- **Gemini**: `https://generativelanguage.googleapis.com` / `gemini-pro`
+- **Gemini**: `https://generativelanguage.googleapis.com` / `gemini-2.0-flash`
 
 ### 使用示例
 
 ```
-"列出所有角色"                                              → 返回全部40名角色
+"列出所有角色"                                              → 返回全部96名角色
 "希儿的技能是什么"                                          → 角色详情查询
 "模拟希儿打可可利亚"                                        → 战斗模拟
 "给希儿推荐遗器配装"                                        → 按命途推荐遗器套装
@@ -102,23 +102,27 @@ LLM 模式（默认）                   规则模式（回退）
 
 | 模块 | 测试数 | 覆盖内容 |
 |------|-------|---------|
-| IntentResolver | 22 | 16种意图精确匹配 |
-| RelicScorer | 12 | 权重/评分/词条分析 |
-| DamageCalculator | 12 | 7乘区/防御/抗性/暴击公式 |
+| IntentResolver | 16 | 16种意图精确匹配 |
+| RelicScorer | 6 | 权重/评分/词条分析 |
+| DamageCalculator | 18 | 7乘区/防御/抗性/暴击公式 |
 | TeamAnalyzer | 11 | 协同/命途/元素/DPS估算 |
-| UpgradeAnalyzer | 14 | 星魂/精炼/性价比曲线 |
-| FilePlayerDao | 20 | JSON 持久化完整 CRUD |
+| UpgradeAnalyzer | 16 | 星魂/精炼/性价比曲线 |
+| FilePlayerDao | 23 | JSON 持久化完整 CRUD |
 | InMemoryGameDataSource | 16 | 全部数据查询 API 完整性 |
 | MarkdownParser | 19 | 标题/列表/粗体/斜体/代码块解析 |
-| **总计** | **126** | 全部通过 ✅ |
+| StarRailAgent | 15 | Agent 编排/对话/回退逻辑 |
+| ToolExecutor | 24 | 工具定义与执行 |
+| ConversationRepository | 8 | 对话持久化 CRUD |
+| WikiDataLoading | 4 | Wiki JSON 数据加载验证 |
+| **总计** | **176** | 全部通过 ✅ |
 
 ## 📊 数据源规模
 
 | 数据 | 数量 | 覆盖范围 |
 |------|------|---------|
-| 角色 | **40 名** | 五星30+四星10，含全部主流限定 |
-| 光锥 | **40 个** | 五星18+四星22，适配7个命途 |
-| 遗器套装 | **42 套** | 遗器23套+位面饰品18套 |
+| 角色 | **96 条** | Wiki 图鉴条目（5星61 / 4星17，其余待补全） |
+| 光锥 | **161 条** | Wiki 图鉴条目（部分条目仅有标题，待补全详情） |
+| 遗器套装 | **56 套** | 隧洞遗器 + 位面饰品 |
 | 敌人 | **25 个** | 周本Boss/混沌精英/模拟宇宙/活动 |
 | LLM 提供商 | **4 种** | DeepSeek / OpenAI / Gemini / 自定义 |
 
@@ -127,7 +131,7 @@ LLM 模式（默认）                   规则模式（回退）
 | 指标 | 值 |
 |------|-----|
 | 源码文件 | **33+** |
-| 单元测试 | **126 项** |
+| 单元测试 | **176 项** |
 | 编译 | 0 errors ✅ |
 | APK | 构建成功 ✅ |
 | SDK | minSdk 24 / targetSdk 35 |
