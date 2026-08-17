@@ -381,7 +381,7 @@ class ToolExecutor(
                     "summary" to it.summary
                 )
             },
-            "recommended" to results.firstOrNull()?.characterName ?: "",
+            "recommended" to (results.firstOrNull()?.characterName ?: ""),
             "summary" to if (results.isEmpty()) "无量化结果" else {
                 "战斗模型量化（${cycles}轮）：" + results.joinToString("；") { it.summary }
             }
