@@ -363,7 +363,7 @@ class ToolExecutor(
         
         return mapOf<String, Any?>(
             "characters" to results.map {
-                mapOf(
+                mapOf<String, Any?>(
                     "character" to it.characterName,
                     "element" to it.element.displayName,
                     "path" to it.path.displayName,
@@ -493,7 +493,7 @@ class ToolExecutor(
         
         val sorted = teamModels.sortedByDescending { (it.second["total_cycle_damage"] as? Number)?.toDouble() ?: 0.0 }
         val rankings = sorted.mapIndexed { rank, (_, model) ->
-            mapOf("rank" to (rank + 1), "team" to model["team"])
+            mapOf<String, Any?>("rank" to (rank + 1), "team" to model["team"])
         }
         
         return mapOf<String, Any?>(
@@ -572,7 +572,7 @@ class ToolExecutor(
             "synergy_score" to synergyScore,
             "team_synergy" to (parts.joinToString("+").ifEmpty { "无配队增益" }),
             "members" to results.map {
-                mapOf(
+                mapOf<String, Any?>(
                     "name" to it.characterName,
                     "cycle_damage" to it.cycleDamage,
                     "dps_score" to it.dpsScore,
