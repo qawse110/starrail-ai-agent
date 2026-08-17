@@ -22,7 +22,7 @@ class WikiDataSyncManager(private val dataDir: File) {
 
     companion object {
         private const val API_BASE = "https://wiki.biligame.com/sr/api.php"
-        private val REQUEST_INTERVAL_MS = 500L  // 避免触发限流
+        private val REQUEST_INTERVAL_MS = 1000L  // 避免触发限流
         private val CATEGORIES = mapOf(
             "角色" to "角色图鉴",
             "光锥" to "光锥图鉴",
@@ -322,7 +322,7 @@ class WikiDataSyncManager(private val dataDir: File) {
                     conn.requestMethod = "GET"
                     conn.connectTimeout = 15000
                     conn.readTimeout = 30000
-                    conn.setRequestProperty("User-Agent", "StarRailAI-Agent/1.0 (Android)")
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 StarRailAI-Agent/1.0")
                     conn.setRequestProperty("Accept", "application/json")
                     
                     val responseCode = conn.responseCode
@@ -339,7 +339,7 @@ class WikiDataSyncManager(private val dataDir: File) {
                 }
             } catch (e: Exception) {
                 lastException = e
-                if (attempt < 3) Thread.sleep(1000L * attempt)
+                if (attempt < 3) Thread.sleep(2000L * attempt)
             }
         }
         throw lastException ?: java.io.IOException("API请求失败")

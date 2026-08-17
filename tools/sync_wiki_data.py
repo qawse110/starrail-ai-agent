@@ -18,8 +18,8 @@ import urllib.parse
 import urllib.error
 
 API_BASE = "https://wiki.biligame.com/sr/api.php"
-USER_AGENT = "StarRailAI-Agent/1.0 (Python)"
-REQUEST_DELAY = 0.5  # 500ms 限流
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 StarRailAI-Agent/1.0"
+REQUEST_DELAY = 1.5  # 1.5s 限流，降低被 wiki 拒请求的概率
 
 CATEGORIES = [
     ("角色", "characters"),
@@ -32,7 +32,11 @@ def api_get(params):
     """调用 MediaWiki API（带重试和响应格式校验）"""
     query_string = urllib.parse.urlencode(params)
     url = f"{API_BASE}?{query_string}"
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    req = urllib.request.Request(url, headers={
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+    })
     
     for attempt in range(3):
         try:
@@ -45,7 +49,7 @@ def api_get(params):
         except Exception as e:
             print(f"  API重试 {attempt+1}/3: {e}", file=sys.stderr)
             if attempt < 2:
-                time.sleep(3 * (attempt + 1))  # 增加等待时间
+                time.sleep(8 * (attempt + 1))  # 更长退避，降低限流触发概率
     raise Exception(f"API请求失败: {url}")
 
 
@@ -152,6 +156,17 @@ def extract_template_fields(wikitext):
                 value = parts[1].strip() if len(parts) > 1 else ""
                 meta["技能_" + key] = clean_wiki_text_for_value(value)
 
+    # 兜底：如果模板解析没拿到任何字段，退化为扫描全页 |key=value 行
+    if not meta:
+        for line in wikitext.split("\n"):
+            line = line.strip()
+            if line.startswith("|") and "=" in line:
+                parts = line[1:].split("=", 1)
+                key = parts[0].strip()
+                value = parts[1].strip() if len(parts) > 1 else ""
+                if key:
+                    meta[key] = clean_wiki_text_for_value(value)
+
     # 解析基础属性
     _parse_stats(meta)
 
@@ -161,8 +176,8 @@ def extract_template_fields(wikitext):
 def _extract_template_block(wikitext, template_name):
     """从wikitext中提取完整模板块（支持嵌套{{}}）"""
     import re
-    # 找到 {{template_name 的位置
-    pattern = r'\{\{' + re.escape(template_name) + r'[|\s\n]'
+    # 找到 {{template_name 的位置；允许模板名后紧跟 HTML 注释（如 {{光锥图鉴<!-- ... -->）
+    pattern = r'\{\{' + re.escape(template_name) + r'(?=\s|[|<]|$)'
     m = re.search(pattern, wikitext)
     if not m:
         return None

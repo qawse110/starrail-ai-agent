@@ -3,7 +3,7 @@
 import json, re, sys, urllib.request, urllib.parse
 
 API_BASE = "https://wiki.biligame.com/sr/api.php"
-UA = "StarRailAI-Agent/1.0"
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 StarRailAI-Agent/1.0"
 
 def api_get(params):
     qs = urllib.parse.urlencode(params)

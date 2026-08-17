@@ -126,6 +126,18 @@ LLM 模式（默认）                   规则模式（回退）
 | 敌人 | **25 个** | 周本Boss/混沌精英/模拟宇宙/活动 |
 | LLM 提供商 | **4 种** | DeepSeek / OpenAI / Gemini / 自定义 |
 
+## 🛠️ 数据同步
+
+```bash
+# 从 bilibili Wiki 全量同步角色/光锥/遗器数据
+python3 tools/sync_wiki_data.py
+
+# 检查当前 wiki_data.json 的完整度
+python3 tools/check_data_completeness.py
+```
+
+> 注意：Wiki 接口有频率限制，同步脚本已做限流和重试；如果遇到 `HTTP 567`，请稍后重试。
+
 ## 📊 代码统计
 
 | 指标 | 值 |

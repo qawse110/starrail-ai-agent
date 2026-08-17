@@ -25,7 +25,6 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
         
         val result = mutableListOf<Character>()
         val hardcoded = createCharacters().associateBy { it.name }
-        val hardcodedNames = hardcoded.keys
         
         for (title in wikiChars.keys()) {
             try {
@@ -38,12 +37,18 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
                 val pathStr = page.optString("命途", "").trim()
                 val elemStr = page.optString("元素属性", "").trim()
                 val faction = page.optString("阵营", "").trim()
-                
-                val rarity = if (rarityStr.contains("5")) 5 else 4
-                val path = parsePath(pathStr) ?: continue
-                val element = parseElement(elemStr) ?: continue
-                
                 val hc = hardcoded[name]
+
+                val rarity = when {
+                    rarityStr.contains("5") -> 5
+                    rarityStr.contains("4") -> 4
+                    hc != null -> hc.rarity
+                    else -> 4
+                }
+                // 命途/属性缺失时优先复用硬编码同名角色的值，避免已知角色因 Wiki 缺字段被丢弃
+                val path = parsePath(pathStr) ?: hc?.path ?: continue
+                val element = parseElement(elemStr) ?: hc?.element ?: continue
+                
                 if (hc != null) {
                     // 用 wiki 元数据覆盖硬编码，保留战斗数据
                     result.add(hc.copy(
@@ -92,13 +97,17 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
                 val name = page.optString("名称", "").trim().ifEmpty { title }
                 val rarityStr = page.optString("稀有度", "").trim()
                 val pathStr = page.optString("命途", "").trim()
-                
+                val hc = hardcoded[name]
+
                 val rarity = when {
                     rarityStr.contains("5") -> 5
                     rarityStr.contains("4") -> 4
+                    rarityStr.contains("3") -> 3
+                    hc != null -> hc.rarity
                     else -> 3
                 }
-                val path = parsePath(pathStr) ?: continue
+                // 命途缺失时优先复用硬编码同名光锥的命途，避免可直接匹配的光锥被丢弃
+                val path = parsePath(pathStr) ?: hc?.path ?: continue
                 
                 // 解析光锥属性
                 val coneStats = parseWikiStats(page)
@@ -111,7 +120,6 @@ class InMemoryGameDataSource(private val wikiJson: JSONObject? = null) {
                     LightConeSkill("", "", emptyList())
                 }
                 
-                val hc = hardcoded[name]
                 if (hc != null) {
                     result.add(hc.copy(rarity = rarity, path = path))
                 } else {
