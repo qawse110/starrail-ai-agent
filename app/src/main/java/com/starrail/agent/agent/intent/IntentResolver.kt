@@ -122,7 +122,7 @@ object IntentPatterns {
     val queryKeywords = listOf("查询", "查看", "看看", "什么", "哪个")
     
     /** 对比关键词 */
-    val compareKeywords = listOf("对比", "比较", "哪个好", "谁强", "选哪个")
+    val compareKeywords = listOf("对比", "比较", "哪个好", "谁强", "选哪个", "量化")
     
     /** 问候关键词 */
     val greetingKeywords = listOf("你好", "hi", "hello", "在吗", "帮忙")
@@ -224,12 +224,17 @@ class IntentResolver {
             return Triple(Intent.GREETING, 0.9, emptyMap())
         }
         
-        // 2. 战斗相关
+        // 2. 战斗模型量化优先于战斗模拟：量化角色/模型/对比时进入角色对比
+        if (input.contains("量化") && (input.contains("角色") || input.contains("模型") || input.contains("对比") || input.contains("比较"))) {
+            return Triple(Intent.COMPARE_CHARACTERS, 0.85, emptyMap())
+        }
+        
+        // 3. 战斗相关
         if (IntentPatterns.battleKeywords.any { input.contains(it) }) {
             return Triple(Intent.SIMULATE_BATTLE, 0.8, mapOf("target" to (entities.primaryEnemy ?: "default")))
         }
         
-        // 3. 遗器相关
+        // 4. 遗器相关
         if (IntentPatterns.relicKeywords.any { input.contains(it) }) {
             val intent = when {
                 input.contains("评分") || input.contains("评价") -> Intent.SCORE_CHARACTER_RELICS
@@ -241,7 +246,7 @@ class IntentResolver {
             return Triple(intent, 0.8, emptyMap())
         }
         
-        // 4. 配队相关
+        // 5. 配队相关
         if (IntentPatterns.teamKeywords.any { input.contains(it) }) {
             val intent = when {
                 input.contains("对比") || input.contains("比较") -> Intent.COMPARE_TEAMS
@@ -251,7 +256,7 @@ class IntentResolver {
             return Triple(intent, 0.8, emptyMap())
         }
         
-        // 5. 升级相关（注意：先检测比较路径再检测单一分析）
+        // 6. 升级相关（注意：先检测比较路径再检测单一分析）
         if (IntentPatterns.upgradeKeywords.any { input.contains(it) }) {
             val intent = when {
                 input.contains("先") && input.contains("还是") -> Intent.COMPARE_UPGRADE_PATH
@@ -262,12 +267,12 @@ class IntentResolver {
             return Triple(intent, 0.75, emptyMap())
         }
         
-        // 6. 对比相关
+        // 7. 对比相关
         if (IntentPatterns.compareKeywords.any { input.contains(it) }) {
             return Triple(Intent.COMPARE_CHARACTERS, 0.7, emptyMap())
         }
         
-        // 7. 未知
+        // 8. 未知
         return Triple(Intent.UNKNOWN, 0.5, emptyMap())
     }
     

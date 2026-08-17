@@ -8,7 +8,7 @@
 | 模块 | 能力 | 状态 |
 |------|------|------|
 | 🤖 **LLM 智能对话** | 自然语言理解 + Function Calling 调用17个游戏工具 | ✅ |
-| ⚔️ **战斗模拟** | 8乘区伤害公式 + 行动轴/行动值估算 | ✅ |
+| ⚔️ **战斗模拟** | 8乘区伤害公式 + 行动轴/行动值估算 + 角色战斗模型量化 | ✅ |
 | 💎 **遗器分析** | 遗器评分（3大维度）、套装推荐（按命途匹配）、升级建议 | ✅ |
 | 👥 **配队对比** | 队伍协同分析（元素/命途/技能）、DPS 估算 | ✅ |
 | ⬆️ **星魂提升** | 星魂收益曲线、精炼性价比、升级路径优化 | ✅ |
@@ -33,6 +33,7 @@ app/src/main/java/com/starrail/agent/
 │   └── db/                 # 持久化层（FilePlayerDao + JSON序列化）
 ├── battle/calculator/      # 战斗计算器（CombatStats / 防御区 / 抗性区 / 易伤区）
 ├── battle/engine/          # 行动轴/行动值计算器（ActionTimeline）
+├── battle/model/           # 战斗模型量化器（配队增益/DPS评分）
 ├── relic/                  # 遗器评分器（4种Build类型权重）
 ├── team/                   # 配队分析器（协同评分 + DPS估算）
 ├── upgrade/                # 升级分析器（星魂/精炼/性价比）
@@ -103,20 +104,21 @@ LLM 模式（默认）                   规则模式（回退）
 
 | 模块 | 测试数 | 覆盖内容 |
 |------|-------|---------|
-| IntentResolver | 16 | 16种意图精确匹配 |
+| IntentResolver | 17 | 16种意图精确匹配 + 量化识别 |
 | RelicScorer | 6 | 权重/评分/词条分析 |
 | DamageCalculator | 20 | 8乘区/混合倍率/防御/抗性/破韧/易伤/暴击公式 |
 | ActionTimeline | 7 | 行动值/轮次行动数/提前/延后 |
+| BattleModelQuantifier | 4 | 单人/配队增益/弱点匹配/评分 |
 | TeamAnalyzer | 11 | 协同/命途/元素/DPS估算 |
 | UpgradeAnalyzer | 16 | 星魂/精炼/性价比曲线 |
 | FilePlayerDao | 23 | JSON 持久化完整 CRUD |
 | InMemoryGameDataSource | 16 | 全部数据查询 API 完整性 |
 | MarkdownParser | 19 | 标题/列表/粗体/斜体/代码块解析 |
 | StarRailAgent | 15 | Agent 编排/对话/回退逻辑 |
-| ToolExecutor | 24 | 工具定义与执行 |
+| ToolExecutor | 25 | 工具定义与执行 |
 | ConversationRepository | 8 | 对话持久化 CRUD |
 | WikiDataLoading | 4 | Wiki JSON 数据加载验证 |
-| **总计** | **185** | 全部通过 ✅ |
+| **总计** | **191** | 全部通过 ✅ |
 
 ## 📊 数据源规模
 

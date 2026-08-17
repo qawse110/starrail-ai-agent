@@ -221,6 +221,26 @@ class ToolExecutorTest {
     }
 
     @Test
+    fun testQuantifyBattleModel_calculated() {
+        val result = executor.execute(
+            "quantify_battle_model",
+            mapOf(
+                "characters" to listOf("希儿", "镜流"),
+                "team" to listOf("布洛妮娅"),
+                "target_enemy" to "可可利亚"
+            )
+        )
+        assertTrue(result.success)
+        val data = result.data as? Map<*, *>
+        assertNotNull(data)
+        val chars = data!!["characters"] as? List<*>
+        assertNotNull(chars)
+        assertTrue("应返回量化结果", chars!!.isNotEmpty())
+        assertNotNull(data["recommended"])
+        assertTrue((data["recommended"] as? String)?.isNotEmpty() == true)
+    }
+
+    @Test
     fun testSimulateBattle_calculated() {
         val result = executor.execute("simulate_battle", mapOf("character_id" to "希儿", "target_enemy" to "可可利亚"))
         assertTrue(result.success)

@@ -69,6 +69,14 @@ class IntentResolverTest {
     }
     
     @Test
+    fun testQuantifyBattleModel() {
+        val result = resolver.resolve("量化希儿和镜流的战斗模型")
+        assertEquals(Intent.COMPARE_CHARACTERS, result.intent)
+        assertTrue(result.entities.characters.contains("希儿"))
+        assertTrue(result.entities.characters.contains("镜流"))
+    }
+    
+    @Test
     fun testEidolonAnalysis() {
         val result = resolver.resolve("希儿星魂提升有多大")
         assertEquals(Intent.ANALYZE_EIDOLON, result.intent)

@@ -3,6 +3,7 @@ package com.starrail.agent.agent.tool
 import com.starrail.agent.agent.intent.*
 import com.starrail.agent.battle.calculator.*
 import com.starrail.agent.battle.engine.ActionTimeline
+import com.starrail.agent.battle.model.BattleModelQuantifier
 import com.starrail.agent.relic.*
 import com.starrail.agent.team.*
 import com.starrail.agent.upgrade.*
@@ -63,6 +64,7 @@ class ToolExecutor(
     private val eidolonAnalyzer: EidolonAnalyzer = EidolonAnalyzer(),
     private val lightConeAnalyzer: LightConeAnalyzer = LightConeAnalyzer(),
     private val costBenefitAnalyzer: CostBenefitAnalyzer = CostBenefitAnalyzer(),
+    private val battleModelQuantifier: BattleModelQuantifier = BattleModelQuantifier(),
     private val dataSource: com.starrail.agent.core.datasource.InMemoryGameDataSource? = null
 ) {
     /** 所有可用工具 */
@@ -81,6 +83,7 @@ class ToolExecutor(
             val result = when (toolName) {
                 "simulate_battle" -> executeSimulateBattle(parameters)
                 "calculate_damage" -> executeCalculateDamage(parameters)
+                "quantify_battle_model" -> executeQuantifyBattleModel(parameters)
                 "score_relics" -> executeScoreRelics(parameters)
                 "recommend_relic_set" -> executeRecommendRelicSet(parameters)
                 "suggest_relic_upgrade" -> executeSuggestRelicUpgrade(parameters)
@@ -324,6 +327,60 @@ class ToolExecutor(
                     appendLine("${r["type"]}·${r["skill"]}: 期望 ${"%.0f".format(r["expected_damage"])} | 倍率区×${"%.2f".format(r["multiplier_zone"])} 增伤区×${"%.2f".format(r["bonus_zone"])} 防御区×${"%.2f".format(r["defense_zone"])} 抗性区×${"%.2f".format(r["resistance_zone"])} 破韧区×${"%.2f".format(r["weakness_zone"])}")
                 }
                 appendLine("标准循环(E+Q+A): 总伤 ${"%.0f".format(cycleDmg)}，约 ${cyclesToKill} 轮击杀")
+            }
+        )
+    }
+    
+    // === 战斗模型量化工具 ===
+    
+    private fun executeQuantifyBattleModel(parameters: Map<String, Any?>): Map<String, Any> {
+        val ds = dataSource
+        val charNames = when (val raw = parameters["characters"]) {
+            is List<*> -> raw.mapNotNull { it?.toString() }
+            else -> listOfNotNull(getParam(parameters, "character_id", "name", "character_name"))
+        }
+        if (charNames.isEmpty()) {
+            return mapOf("error" to "请至少提供一个要量化的角色")
+        }
+        
+        val teamNames = when (val raw = parameters["team"]) {
+            is List<*> -> raw.mapNotNull { it?.toString() }
+            else -> listOfNotNull(getParam(parameters, "team_members", "team_ids"))
+        }
+        val enemyName = getParam(parameters, "target_enemy", "enemy_name") ?: ""
+        val cycles = (parameters["cycles"] as? Number)?.toInt() ?: 4
+        
+        val characters = charNames.mapNotNull { ds?.searchCharacters(it)?.firstOrNull() }
+        if (characters.isEmpty()) {
+            return mapOf("error" to "未找到可量化的角色")
+        }
+        val team = teamNames.mapNotNull { ds?.searchCharacters(it)?.firstOrNull() }
+        val enemy = if (enemyName.isNotBlank()) ds?.searchEnemies(enemyName)?.firstOrNull() else null
+        
+        val results = characters.map { character ->
+            battleModelQuantifier.quantify(character, team, enemy, cycles)
+        }.sortedByDescending { it.dpsScore }
+        
+        return mapOf(
+            "characters" to results.map {
+                mapOf(
+                    "character" to it.characterName,
+                    "element" to it.element.displayName,
+                    "path" to it.path.displayName,
+                    "base_attack" to it.baseAttack,
+                    "combat_attack" to it.combatAttack,
+                    "cycle_damage" to it.cycleDamage,
+                    "solo_cycle_damage" to it.soloCycleDamage,
+                    "actions_per_cycle" to it.actionsPerCycle,
+                    "weakness_match" to it.weaknessMatch,
+                    "team_buff_multiplier" to it.teamBuffMultiplier,
+                    "dps_score" to it.dpsScore,
+                    "summary" to it.summary
+                )
+            },
+            "recommended" to results.firstOrNull()?.characterName ?: "",
+            "summary" to if (results.isEmpty()) "无量化结果" else {
+                "战斗模型量化（${cycles}轮）：" + results.joinToString("；") { it.summary }
             }
         )
     }
@@ -1127,6 +1184,18 @@ private fun executeAnalyzeLightCone(parameters: Map<String, Any?>): Map<String, 
                 ),
                 module = "battle",
                 requiredIntent = Intent.CALCULATE_DAMAGE
+            ),
+            "quantify_battle_model" to ToolDefinition(
+                name = "quantify_battle_model",
+                description = "对角色进行战斗模型量化，可传入配队和敌人",
+                parameters = listOf(
+                    ToolParameter("characters", ParameterType.LIST, "要量化的角色名称列表", true),
+                    ToolParameter("team", ParameterType.LIST, "队友名称列表（配队增益）", false),
+                    ToolParameter("target_enemy", ParameterType.STRING, "目标敌人", false),
+                    ToolParameter("cycles", ParameterType.INT, "估算轮数", false, "4")
+                ),
+                module = "battle",
+                requiredIntent = Intent.COMPARE_CHARACTERS
             ),
             "score_relics" to ToolDefinition(
                 name = "score_relics",
